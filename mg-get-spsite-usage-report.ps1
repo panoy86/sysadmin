@@ -4,6 +4,7 @@ $sFileReport = "m365-report-spsite-usage.csv"
 function udf_ConnectSPO
 {
     #-- Add your Entra-app Id, Tenant, and cert key
+    #-- Entra app would need 2 application permissions: reports.read.all & sites.read.all
     $sTenantId = "ttttt"
     $sAppId = "aaaaa"
     $sCertThumbPrint = "ppppp"
