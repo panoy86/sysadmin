@@ -2,9 +2,9 @@
 
 #-- Add/remove DLs from this list
 $rDLs = @()
-#$rDLs += "datadog-api-migration"
-$rDLs += "signalflow-to-datadog-migration"
-$sLookFor = "petro"
+$rDLs += "dl-something1"
+$rDLs += "dl-something2"
+$sLookFor = "person-keyword-to-search"
 
 #-- Main program, do not change
 $global:nTotalDLCount = 0
