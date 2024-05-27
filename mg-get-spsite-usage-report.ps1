@@ -3,9 +3,10 @@ $sFileReport = "m365-report-spsite-usage.csv"
 #-- Connect to SPO via this Entra-App
 function udf_ConnectSPO
 {
-    $sTenantId = "57b5a800-5145-4b65-b2e8-e0e50bace0e5"
-    $sAppId = "7c9c2973-02c9-4037-ba20-030a55182b05"
-    $sCertThumbPrint = "af131e55dc6dffb21bacb7745165d385f4e87cb8"
+    #-- Add your Entra-app Id, Tenant, and cert key
+    $sTenantId = "ttttt"
+    $sAppId = "aaaaa"
+    $sCertThumbPrint = "ppppp"
     Connect-MgGraph -ClientID $sAppId -TenantId $sTenantId -CertificateThumbprint $sCertThumbPrint -NoWelcome
 }
 
@@ -36,7 +37,6 @@ function udf_AddSiteData
     }
     $rSites | Export-Csv $sFileReport
 }
-
 
 #-- Main
 udf_ConnectSPO
