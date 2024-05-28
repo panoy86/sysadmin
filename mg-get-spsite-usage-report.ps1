@@ -25,8 +25,11 @@ function udf_AddSiteData
     $rSites | foreach {$_ | Add-Member -Type NoteProperty -Name LastModifiedDateTime -Value '' -Force}
 
     #-- Look thru our list
+    $nCtr = 0
     foreach ($oSite in $rSites)
     {
+        $nCtr++
+        Write-Progress -Activity "Processing site data..." -Status "Processing site $nCtr" -PercentComplete (($nCtr / $rSites.Count) * 100)
         $oTmp = $null
         $oTmp = Get-MgSite -SiteId $oSite."Site Id"
         if ($oTmp -ne $null)
@@ -36,6 +39,7 @@ function udf_AddSiteData
             $oSite.LastModifiedDateTime = $oTmp.LastModifiedDateTime
         }
     }
+    Write-Progress -Activity "Processing site data..." -Completed
     $rSites | Export-Csv $sFileReport
 }
 
