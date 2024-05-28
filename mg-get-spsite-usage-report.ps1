@@ -5,6 +5,10 @@ function udf_ConnectSPO
 {
     #-- Add your Entra-app Id, Tenant, and cert key
     #-- Entra app would need 2 application permissions: reports.read.all & sites.read.all
+    #-- Need a global administrator to set or confirm this setting:
+    #-- In the admin center, go to the Settings > Org Settings > Services page.
+    #-- Select Reports.
+    #-- Uncheck the statement In all reports, display de-identified names for users, groups, and sites, and then save your changes.
     $sTenantId = "ttttt"
     $sAppId = "aaaaa"
     $sCertThumbPrint = "ppppp"
