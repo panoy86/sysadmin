@@ -164,7 +164,7 @@ else
         udfGet-DLMembers($sDL)
         Write-Host "Total users:" $global:hMembers.Count
         Write-Host "Total groups:" $global:hGroupsFound.Count
-		Write-Host ' '
+        Write-Host ' '
     }
 }
 #-- Show final results
