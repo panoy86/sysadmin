@@ -1,0 +1,15 @@
+This scrips is meant to find nested DLs under a parent DL (or set of parent DLs) and look at the accept and reject list to see if a potential sender of an email will get blocked when sending to it.
+
+Example summary output:
+Total users: 5767
+Total groups: 1237
+
+DLs to add user to accept list:
+   dl-something10
+   dl-something11
+   dl-something15
+   etc...
+
+This helps greatly as in the example above when the parent DL has over 1000 nested DLs, it is virtually impossible to manually check those by hand.
+
+*DL - Distribution List
