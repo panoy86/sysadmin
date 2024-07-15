@@ -5,7 +5,7 @@ Write-Host "Authenticating with Graph-API" -ForegroundColor Green
 # Application (client) ID, tenant ID and secret
 $sClientId = ""
 $sTenantId = ""
-$sClientSecret = "Kgz8Q~JZrw9036WRdHrTtC_5HRfS5IOf2D6YWblU"
+$sClientSecret = ""
 
 #-- Construct URI
 $uri = "https://login.microsoftonline.com/$sTenantId/oauth2/v2.0/token"
