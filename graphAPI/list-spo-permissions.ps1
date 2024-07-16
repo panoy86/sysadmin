@@ -2,7 +2,7 @@
 #-- Get the site id
 $sRelativeSiteUrl = "/sites/nnn-publichrfolder"
 #-- To get site-id manually: https://<url>/_api/site/id
-$sUri = "https://graph.microsoft.com/v1.0/sites/paypal.sharepoint.com:" + $sRelativeSiteUrl
+$sUri = "https://graph.microsoft.com/v1.0/sites/<tenant>.sharepoint.com:" + $sRelativeSiteUrl
 $oResult = Invoke-RestMethod -Headers @{Authorization = "Bearer $token"} -Uri $sUri -Method Get
 Set-Variable -Name sSiteId -Value $oResult.id -Scope Script
 
