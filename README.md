@@ -8,3 +8,11 @@ $oCert = New-SelfSignedCertificate -Subject spgraph -CertStoreLocation Cert:\Cur
 #-- Export a .CER file from this
 Export-Certificate -Cert $oCert -FilePath "C:\Scripts\certs\spgraph.cer"
 #-- Next import this .CER onto the Entra-App, under "certificates and secrets"
+
+
+function udf_SendEmailAlert($sBody)
+{
+    $oSecurePassword = ConvertTo-SecureString "none" -AsPlainText -Force
+    $oCredential = New-Object System.Management.Automation.PSCredential ("anonymous", $oSecurePassword)
+    Send-MailMessage -To "4082034622@vtext.com" -SmtpServer "atom.paypalcorp.com" -Credential $oCredential -UseSsl -Subject "Provision-Mail alert" -Port "25" -Body $sBody -From "ftan@paypal.com" -BodyAsHtml
+}
