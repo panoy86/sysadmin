@@ -11,10 +11,11 @@ function udf_AuthGraph
 {
     Write-Host "Authenticating with Graph-API" -ForegroundColor Green
 
-    # Application (client) ID, tenant ID and secret
-    $sClientId = "e15f4b6f-593c-41c5-b6ef-d49388e4b0e8"
-    $sTenantId = "fb007914-6020-4374-977e-21bac5f3f4c8"
-    $sClientSecret = "Kgz8Q~JZrw9036WRdHrTtC_5HRfS5IOf2D6YWblU"
+    #-- Application (client) ID, tenant ID and secret
+    $sClientId = "aaaaa"
+    $sTenantId = "bbbbb"
+    $sClientSecret = "ccccc"
+    #-- I would switch to a cert-based auth, but just using client secret for quick testing... 
 
     #-- Construct URI
     $uri = "https://login.microsoftonline.com/$sTenantId/oauth2/v2.0/token"
