@@ -1,3 +1,8 @@
+#-- Don't know how to use GraphAPI yet to get the group id based on a site URL.
+#-- So, I have to manually get the group id and site URL and put them in a CSV file.
+#-- Use Get-SPOSite <url> | fl groupId
+#-- to get the group id of a site.
+
 #-- Declare global variables
 $script:rgFiles = @()
 $script:rgFolders = @()
