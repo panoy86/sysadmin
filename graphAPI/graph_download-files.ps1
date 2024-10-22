@@ -1,7 +1,7 @@
 #-- Script that uses the list of files from "graph_get-list-of-folders-files.ps1"
 #-- Adds column "download" to designate files to download
 
-Set-Location C:\Scripts\OneDrive\
+Set-Location C:\Scripts\OneDrive\Temp
 $sWorkingFile = ".\tmp_files.csv"
 
 #---------------------------------------------------------------------------------------------------
@@ -45,19 +45,16 @@ function udf_DownloadFile
         [Parameter()]$sItemId
     )
 
-    #-- Get the file
-    $sUri = "https://graph.microsoft.com/v1.0/drives/$($sDriveId)/items/$($sItemId)/content"
-    #$sUri
-    $oAuthHeader = @{'Authorization'="Bearer $token"}
+    #-- Get the file download URL
+    $oAuthHeader = @{'Authorization'="Bearer $token"; "Content-Type"= "application/json"}
+    $sUri = "https://graph.microsoft.com/v1.0/drives/$($sDriveId)/items/$($sItemId)"
     Try {$oResult = Invoke-WebRequest -Method GET -Headers $oAuthHeader -Uri $sUri -ErrorAction Stop}
     Catch {$oResult = $null}
     if ($null -ne $oResult)
     {
-        $oResult
-        $rBytes = $oResult.Content | ConvertFrom-Json
-        $sContent = [System.Text.Encoding]::UTF8.GetString($rBytes)
-        $sContent | Out-File -FilePath ".\$sName" -Force
-        #Set-Content -Path ".\$sName" -Value $rBytes -Stream Default
+        #-- Download the file
+        $oTmp = $oResult.Content | ConvertFrom-Json
+        Invoke-WebRequest -Uri $oTmp."@microsoft.graph.downloadUrl" -OutFile ".\$sName"
         return $true
     }
     else {return $false}
@@ -72,13 +69,10 @@ foreach ($oItem in $rWork)
     if ($oItem.download -eq "true")
     {
         Write-Host "Downloading: $($oItem.name)" -ForegroundColor Yellow
-        #$oItem.parentReference
-        #$oTmp = New-Object System.Object -Property $oItem.parentReference
         $nLength = $oItem.parentReference.Length
         $sTmp = $oItem.parentReference.Substring(2, $nLength - 3)
         $sTmp = $sTmp -replace "; ", "`r`n"
         $oTmp = ConvertFrom-StringData -StringData $sTmp 
         udf_DownloadFile -sName $oItem.name -sDriveId $oTmp.driveId -sItemId $oItem.id
-        break
     }
 }
