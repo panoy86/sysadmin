@@ -414,7 +414,7 @@ function UpdateMembers
 
     #-- Loop thru our list of DLs
     $nCtr = 0
-	$nCount = 0
+    $nCount = 0
     $rErrors = @()
     foreach ($oWork in $rWork)
     {
@@ -463,7 +463,7 @@ function UpdateMembers
             {
                 #-- Add the member to the DL
                 Write-Host "    Adding: " -ForegroundColor Green -NoNewline
-				Write-Host $sSrcGuid
+                Write-Host $sSrcGuid
                 $null = Add-DistributionGroupMember -Identity $oDL.Identity -Member $sSrcGuid -Confirm:$false
             }
         }
@@ -477,14 +477,14 @@ function UpdateMembers
             {
                 #-- Remove the member from the DL
                 Write-Host "    Removing: " -ForegroundColor Green -NoNewline
-				Write-Host $oTgtMember.DisplayName
+                Write-Host $oTgtMember.DisplayName
                 $null = Remove-DistributionGroupMember -Identity $oDL.Identity -Member $oTgtMember.Guid.ToString() -Confirm:$false
             }
         }
 
         #-- For testing, stop at a breakpoint
-		$nCount++
-		if ($nCount -ge 200) {break}
+        $nCount++
+        if ($nCount -ge 200) {break}
     }
     if ($rErrors.Count -gt 0)
     {
