@@ -420,8 +420,8 @@ function UpdateMembers
     {
         #-- Show progress and bypass certain items
         $nCtr++
-        Write-Progress -Activity "Updating DL Members" -Status $oWork.TgtGuid -PercentComplete ($nCtr * 100 / $rWork.Count)
         if ($oWork.State -ne "Created") {continue}  #-- Only process the created DLs
+        Write-Progress -Activity "Updating DL Members" -Status $oWork.TgtGuid -PercentComplete ($nCtr * 100 / $rWork.Count)
         
         #-- Get the target DL and its current members
         $oDL = Get-DistributionGroup $oWork.TgtGuid -ea SilentlyContinue
@@ -462,7 +462,7 @@ function UpdateMembers
             if (-not $hTgtMembers.ContainsKey($sSrcGuid))
             {
                 #-- Add the member to the DL
-                Write-Host "    Adding: " $sSrcGuid -ForegroundColor Green -NoNewline
+                Write-Host "    Adding: " -ForegroundColor Green -NoNewline
 				Write-Host $sSrcGuid
                 $null = Add-DistributionGroupMember -Identity $oDL.Identity -Member $sSrcGuid -Confirm:$false
             }
@@ -484,7 +484,7 @@ function UpdateMembers
 
         #-- For testing, stop at a breakpoint
 		$nCount++
-		if ($nCount -ge 100) {break}
+		if ($nCount -ge 200) {break}
     }
     if ($rErrors.Count -gt 0)
     {
