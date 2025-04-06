@@ -146,7 +146,7 @@ function CreateDL
                 $oItem.State = "Created"
                 $oItem.Error = $null
                 $oItem.LastUpdate = (Get-Date).ToString()
-                $null = Set-DistributionGroup $sNewEmail -CustomAttribute15 "caes-dl" -HiddenFromAddressListsEnabled:$true
+                $null = Set-DistributionGroup $sNewEmail -CustomAttribute15 "source-dl" -HiddenFromAddressListsEnabled:$true
                 $nCount++
             }
             else
@@ -221,7 +221,7 @@ function CreateMemberMapping
     #-- Update the target mailboxes
     $rMapping = Import-Csv $script:sMappingFile
     $hTmp = @{}
-    $rMapping | ForEach-Object {if ($_.caesguid.Length -gt 0) {$hTmp.Add($_.caesguid, $_.honemail)}}
+    $rMapping | ForEach-Object {if ($_.srcguid.Length -gt 0) {$hTmp.Add($_.srcguid, $_.honemail)}}
     $nCountMapped = 0
     $nCountFound = 0
     $nCtr = 0
@@ -308,15 +308,15 @@ function CreateMailContacts
     foreach ($oMap in $rMappings)
     {
         #-- Check if the email is valid
-        $sSrcEmail = $oMap.caesemail.Trim()
+        $sSrcEmail = $oMap.srcemail.Trim()
         if ($sSrcEmail.Length -eq 0) {continue}
 
         #-- Check if the source guid is valid and find the member data
-        if ($oMap.caesguid.Trim.Length -eq 0) {continue}
-        if (-not $hMembers.ContainsKey($oMap.caesguid)) {continue}
+        if ($oMap.srcguid.Trim.Length -eq 0) {continue}
+        if (-not $hMembers.ContainsKey($oMap.srcguid)) {continue}
 
         #-- Check if the user is already defined in the target
-        $oMember = $hMembers[$oMap.caesguid]
+        $oMember = $hMembers[$oMap.srcguid]
         if ($oMember.TgtGuid.Length -gt 0) {continue}
 
         #-- Create a new mail contact or assign the existing one
@@ -326,9 +326,9 @@ function CreateMailContacts
         {
             #-- Create the mail contact
             Write-Host "  Creating mail contact:" $sSrcEmail
-            $sAlias = "caes_" + (-join ((48..57) + (97..122) | Get-Random -Count 10 | ForEach-Object {[char]$_}))
+            $sAlias = "src_" + (-join ((48..57) + (97..122) | Get-Random -Count 10 | ForEach-Object {[char]$_}))
             $null = New-MailContact -Alias $sAlias -Name $sAlias -DisplayName $sAlias -ExternalEmailAddress $sSrcEmail
-            $null = Set-MailContact $sAlias -CustomAttribute15 "caes-mail-contact" -HiddenFromAddressListsEnabled:$true
+            $null = Set-MailContact $sAlias -CustomAttribute15 "src-mail-contact" -HiddenFromAddressListsEnabled:$true
             $nCountCreated++
         }
         #-- Confirm if new contact was created or get the existing object
@@ -372,17 +372,17 @@ function RemoveMailContacts
         Write-Progress -Activity "Removing mail contacts" -Status '.' -PercentComplete ($nCtr * 100 / $rMappings.Count)
 
         #-- Check if the email is valid
-        $sSrcEmail = $oMap.caesemail.Trim()
+        $sSrcEmail = $oMap.srcemail.Trim()
         if ($sSrcEmail.Length -eq 0) {continue}
 
         #-- Check if the source guid is valid and find the member data
-        if ($oMap.caesguid.Trim.Length -eq 0) {continue}
-        if (-not $hMembers.ContainsKey($oMap.caesguid)) {continue}
+        if ($oMap.srcguid.Trim.Length -eq 0) {continue}
+        if (-not $hMembers.ContainsKey($oMap.srcguid)) {continue}
 
         #-- Get the member data
-        if ($hMembers.ContainsKey($oMap.caesguid))
+        if ($hMembers.ContainsKey($oMap.srcguid))
         {
-            $oMember = $hMembers[$oMap.caesguid]
+            $oMember = $hMembers[$oMap.srcguid]
             if ($oMember.TgtGuid.Length -gt 0 -and $oMember.TgtType -match "Mailbox")
             {
                 #-- Check if the source email is a mail contact
@@ -500,7 +500,7 @@ function UpdateMembers
 $PSStyle.Progress.View = "Minimal"  #-- Other values: "Classic"
 $ProgressPreference = "Continue"
 
-UpdateWorkFile  #-- Update the list of CAES DLs to create or delete from target
+UpdateWorkFile  #-- Update the list of src DLs to create or delete from target
 if ((Read-Host "  Creating a member mapping for 6k objects can take an hour, do you want to proceed? (yes/no)").Trim().ToLower() -match "y") {CreateMemberMapping}  #-- Update the mapping file with source and target members
 
 #CreateDL
