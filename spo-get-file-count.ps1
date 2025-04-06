@@ -106,7 +106,7 @@ foreach ($oSite in $rSites)
 
     #-- Add myself as an admin
     $sUrl = $oSite.Url
-    $sAdmin = "ftan-a@paypal.com"
+    $sAdmin = "ftan-a@nnn.com"
     $null = Set-SPOUser -Site $sUrl -LoginName $sAdmin -IsSiteCollectionAdmin:$true
     Start-Sleep 5
     
