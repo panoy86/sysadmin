@@ -14,8 +14,8 @@ function udf_AuthGraphApi
         [Parameter()]$bSilent = $true
     )
 
-    $sTenantId = "fb007914-6020-4374-977e-21bac5f3f4c8"
-    $sClientId = "2417f530-7fe2-48ef-85c7-d5f09b9564d7"
+    $sTenantId = ""
+    $sClientId = ""
     $sSecretB64 = "OWx4OFF+MGlrSnNabVVUYS1wNXZXfjVTS0hqVE9lY3ozX29BaGNqTQ=="  #-- expires 2/23/2025
     $bytes = [System.Convert]::FromBase64String($sSecretB64)
     $sClientSecret = [System.Text.Encoding]::UTF8.GetString($bytes)
