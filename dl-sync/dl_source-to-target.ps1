@@ -118,7 +118,7 @@ function CreateDL
 
             #-- Check first if another object with the same name exists
             $bExists = $false
-            $sNewEmail = ($oDL.PrimarySmtpAddress -split "@")[0] + "@honeywell.us"
+            $sNewEmail = ($oDL.PrimarySmtpAddress -split "@")[0] + "@something.us"
             if ($null -ne (Get-Recipient $sNewEmail -ea SilentlyContinue)) {$bExists = $true}
             if ($null -ne (Get-Recipient $oDL.Alias -ea SilentlyContinue)) {$bExists = $true}
             if ($null -ne (Get-Recipient $oDL.Name -ea SilentlyContinue)) {$bExists = $true}
@@ -221,7 +221,7 @@ function CreateMemberMapping
     #-- Update the target mailboxes
     $rMapping = Import-Csv $script:sMappingFile
     $hTmp = @{}
-    $rMapping | ForEach-Object {if ($_.srcguid.Length -gt 0) {$hTmp.Add($_.srcguid, $_.honemail)}}
+    $rMapping | ForEach-Object {if ($_.srcguid.Length -gt 0) {$hTmp.Add($_.srcguid, $_.tgtemail)}}
     $nCountMapped = 0
     $nCountFound = 0
     $nCtr = 0
