@@ -42,7 +42,7 @@ function Get-PnPOneDriveRetentionLabelReport()
 }
 
 #-- Main script
-$sAdmin = "ftan-a@paypal.com"
+$sAdmin = "ftan-a@nnn.com"
 $rWork = Import-Csv .\zz.csv
 $nCountToWorkOn = 4000
 
