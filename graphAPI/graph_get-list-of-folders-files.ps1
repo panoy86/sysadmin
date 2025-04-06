@@ -21,7 +21,7 @@ function udf_AuthGraphApi
 
     $sTenantId = ""
     $sClientId = ""
-    $sSecretB64 = "OWx4OFF+MGlrSnNabVVUYS1wNXZXfjVTS0hqVE9lY3ozX29BaGNqTQ=="
+    $sSecretB64 = ""
     $bytes = [System.Convert]::FromBase64String($sSecretB64)
     $sClientSecret = [System.Text.Encoding]::UTF8.GetString($bytes)
 
