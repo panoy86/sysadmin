@@ -43,7 +43,7 @@ foreach ($sUrl in $r)
 {
     #-- Get the holds
     Write-Progress -Activity $sUrl
-    $null = Set-SPOUser -Site $sUrl -LoginName ftan-a@paypal.com -IsSiteCollectionAdmin:$TRUE
+    $null = Set-SPOUser -Site $sUrl -LoginName ftan-a@something.com -IsSiteCollectionAdmin:$TRUE
     Connect-PnPOnline -Url $sUrl -SPOManagementShell
     udf_GetHolds -sUrl $sUrl
     Disconnect-PnPOnline
