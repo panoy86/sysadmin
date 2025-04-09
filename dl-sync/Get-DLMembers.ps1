@@ -1,6 +1,6 @@
 #-- Script to extract all members of a DL, and members of sub-DLS, etc...
 $rDLs = @()
-$rDls += "mgr-achriss-director-above"
+$rDls += "something"
 
 #-- Main program, do not change
 $global:hTotalMembers = @{}
@@ -124,17 +124,17 @@ foreach($t in $rFinal)
 {
     $nCtr++; Write-Progress -Activity '.' -Status $t.Name -PercentComplete ($nCtr/$rFinal.Count * 100)
     $oNew = New-Object System.Object
-    $oNew | Add-Member –Type NoteProperty –Name SamAccountName –Value $t.SamAccountName
-    $oNew | Add-Member –Type NoteProperty –Name Name –Value $t.Name
-    $oNew | Add-Member –Type NoteProperty –Name PrimarySmtpAddress –Value $t.PrimarySmtpAddress.ToString()
-    $oNew | Add-Member –Type NoteProperty –Name Database –Value $t.Database
-    $oNew | Add-Member –Type NoteProperty –Name ServerName –Value $t.ServerName
+    $oNew | Add-Member â€“Type NoteProperty â€“Name SamAccountName â€“Value $t.SamAccountName
+    $oNew | Add-Member â€“Type NoteProperty â€“Name Name â€“Value $t.Name
+    $oNew | Add-Member â€“Type NoteProperty â€“Name PrimarySmtpAddress â€“Value $t.PrimarySmtpAddress.ToString()
+    $oNew | Add-Member â€“Type NoteProperty â€“Name Database â€“Value $t.Database
+    $oNew | Add-Member â€“Type NoteProperty â€“Name ServerName â€“Value $t.ServerName
     $sEmailAddresses = ""
     foreach($oEmail in $t.EmailAddresses)
     {
         if ($oEmail.PrefixString.ToLower() -eq "smtp") { $sEmailAddresses += ($oEmail.AddressString + "; ") }
     }
-    $oNew | Add-Member –Type NoteProperty –Name EmailAddresses –Value $sEmailAddresses
+    $oNew | Add-Member â€“Type NoteProperty â€“Name EmailAddresses â€“Value $sEmailAddresses
     $rExport += $oNew
 }
 $rExport | Sort Database | Export-Csv zz.csv
