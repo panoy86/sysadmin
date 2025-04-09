@@ -1,6 +1,7 @@
 $script:sWorkFile    = ".\dl_workfile.csv"
 $script:sMembersFile = ".\dl_members-source-target.csv"
 $script:sMappingFile = ".\dl_users-mapping.csv"
+$script:rErrors = @()
 
 #------------------------------------------------------------------------------
 #-- Aux function to return the target GUID, based on the source GUID
@@ -112,13 +113,17 @@ function CreateDL
                 continue
             }
 
-            #-- Bypass if the DL is hidden, is roomlist
-            if ($oDL.HiddenFromAddressListsEnabled -eq "true") {continue}
-            if ($oDL.RecipientTypeDetails -eq "RoomList") {continue}
+            #-- Bypass if the DL is hidden, is roomlist, except in our "force create" list
+            $bBypass = $false
+            if ($oDL.HiddenFromAddressListsEnabled -eq "true") {$bBypass = $true}
+            if ($oDL.RecipientTypeDetails -eq "RoomList") {$bBypass = $true}
+            [array]$rTmp = (Get-Content dl_force-create-these.txt | Where-Object {$_.Trim() -notlike "#*"})
+            if ($oItem.SrcGuid -in $rTmp) {$bBypass = $false}
+            if ($bBypass) {continue}
 
             #-- Check first if another object with the same name exists
             $bExists = $false
-            $sNewEmail = ($oDL.PrimarySmtpAddress -split "@")[0] + "@something.us"
+            $sNewEmail = ($oDL.PrimarySmtpAddress -split "@")[0] + "@honeywell.us"
             if ($null -ne (Get-Recipient $sNewEmail -ea SilentlyContinue)) {$bExists = $true}
             if ($null -ne (Get-Recipient $oDL.Alias -ea SilentlyContinue)) {$bExists = $true}
             if ($null -ne (Get-Recipient $oDL.Name -ea SilentlyContinue)) {$bExists = $true}
@@ -146,7 +151,7 @@ function CreateDL
                 $oItem.State = "Created"
                 $oItem.Error = $null
                 $oItem.LastUpdate = (Get-Date).ToString()
-                $null = Set-DistributionGroup $sNewEmail -CustomAttribute15 "source-dl" -HiddenFromAddressListsEnabled:$true
+                $null = Set-DistributionGroup $sNewEmail -CustomAttribute15 "caes-dl" -HiddenFromAddressListsEnabled:$true
                 $nCount++
             }
             else
@@ -159,6 +164,169 @@ function CreateDL
     }
     Write-Host "  New DLs: $nCount"
     $rWork | Export-Csv $sWorkFile -NoTypeInformation
+}
+
+#------------------------------------------------------------------------------
+#-- Update the properties of the DLs
+#------------------------------------------------------------------------------
+function UpdateDLProperties
+{
+    Write-Host "Updating the properties of the DLs" -ForegroundColor Green
+
+    #-- Get the working files
+    $rWork = Import-Csv $script:sWorkFile
+    $rOwners = Import-Csv ".\exp-dls-managedby.csv"
+    $rAccepts = Import-Csv ".\exp-dls-accept.csv"
+    $hDLs = @{}
+    Import-Csv ".\exp-dls.csv" | ForEach-Object {$hDLs.Add($_.Guid, $_)}
+
+    #-- Loop thru our list of DLs
+    $nCtr = 0
+    foreach ($oWork in $rWork)
+    {
+        #-- Show progress and bypass certain items
+        $nCtr++
+        if ($oWork.State -ne "Created") {continue}  #-- Only process the created DLs
+        $oDL = $null
+        $oDL = Get-DistributionGroup $oWork.TgtGuid -ea SilentlyContinue
+        if ($null -eq $oDL)
+        {
+            LogError $oWork.SrcGuid $oWork.SrcType $oWork.TgtGuid $oWork.TgtType "Target DL not found"
+            continue
+        }  #-- DL not found
+        Write-Progress -Activity "Updating DL Properties" -Status $oDL.DisplayName -PercentComplete ($nCtr * 100 / $rWork.Count)
+
+        #-- Update the owners
+        [array]$rTmp = $rOwners | Where-Object {$_.DLGuid -match $oWork.SrcGuid}
+        if ($rTmp.Count -gt 0)
+        {
+            #-- Normalize the current owners as a string
+            $sOwners = $oDL.ManagedBy -join ','
+            foreach ($oTmp in $rTmp)
+            {
+                #-- Get the target GUID if exists
+                $sTgtGuid = GetTargetGuid $oTmp.Guid
+                if ($null -ne $sTgtGuid)
+                {
+                    $oRecipient = $null
+                    $oRecipient = Get-Recipient $sTgtGuid -ea SilentlyContinue
+                    if ($null -ne $oRecipient)
+                    {
+                        #-- Add the owner to the DL
+                        if ($sOwners -notmatch $oRecipient.Name)
+                        {
+                            Write-Host "  Adding owner: " -NoNewline -ForegroundColor Green
+                            Write-Host $oWork.TgtGuid $oRecipient.DisplayName
+                            Set-DistributionGroup $oWork.TgtGuid -ManagedBy @{Add=$($sTgtGuid)} -BypassSecurityGroupManagerCheck 
+                        }
+                        #-- Remove my account as owner
+                        if ($sOwners -match "h592867")
+                        {
+                            $null = Set-DistributionGroup $oWork.TgtGuid -ManagedBy @{Remove="f292f968-c1c5-476c-a8d9-baf596dc01c0"}
+                        }
+                    }
+                }
+                else
+                {
+                    LogError $oTmp.Guid $oTmp.RecipientTypeDetails $null $null "Target DL owner not found"
+                }
+            }
+        }
+
+        #-- Update RequireSenderAuthenticationEnabled
+        if ($hDLs.ContainsKey($oWork.SrcGuid))
+        {
+            $oSourceDL = $hDLs[$oWork.SrcGuid]
+            $sRequire = $oSourceDL.RequireSenderAuthenticationEnabled
+            #-- Check if we need to change it
+            if ($oDL.RequireSenderAuthenticationEnabled -and $sRequire -eq "False")
+            {
+                Write-Host "  Updating RequireSenderAuthenticationEnabled: " -NoNewline -ForegroundColor Green
+                Write-Host "From" $oDL.RequireSenderAuthenticationEnabled.ToString() "To" $sRequire
+                $null = Set-DistributionGroup $oWork.TgtGuid -RequireSenderAuthenticationEnabled:$False
+            }
+            if (-not $oDL.RequireSenderAuthenticationEnabled -and $sRequire -eq "True")
+            {
+                Write-Host "  Updating RequireSenderAuthenticationEnabled: " -NoNewline -ForegroundColor Green
+                Write-Host "From" $oDL.RequireSenderAuthenticationEnabled.ToString() "To" $sRequire
+                $null = Set-DistributionGroup $oWork.TgtGuid -RequireSenderAuthenticationEnabled:$True
+            }
+        }
+
+        #-- Add the LegacyExchangeDN as an x500 address
+        if ($hDLs.ContainsKey($oWork.SrcGuid))
+        {
+            $oSourceDL = $hDLs[$oWork.SrcGuid]
+            $sLegacyExchangeDN = $oSourceDL.LegacyExchangeDN
+            $sEmailAddressString = $oDL.EmailAddresses -join ';'
+            #-- Check if the x500 address already exists
+            if ($null -eq ($sEmailAddressString | Select-String -Pattern $sLegacyExchangeDN -SimpleMatch))
+            {
+                Write-Host $sEmailAddressString $sLegacyExchangeDN
+                Write-Host "  Adding LegacyExchangeDN: " -NoNewline -ForegroundColor Green
+                Write-Host $sLegacyExchangeDN "To" $oDL.Name
+                $null = Set-DistributionGroup $oWork.TgtGuid -EmailAddresses @{Add="x500:$sLegacyExchangeDN"}
+            }
+        }
+
+        #-- Update the DL's accept list
+        [array]$rTmp = $rAccepts | Where-Object {$_.DLGuid -match $oWork.SrcGuid}
+        if ($rTmp.Count -gt 0)
+        {
+            #-- Normalize the current accept-list as a string
+            $sAcceptList = $oDL.AcceptMessagesOnlyFromSendersOrMembers -join ','
+            foreach ($oTmp in $rTmp)
+            {
+                #-- Get the target GUID if exists
+                $sTgtGuid = GetTargetGuid $oTmp.Guid
+                if ($null -ne $sTgtGuid)
+                {
+                    $oRecipient = $null
+                    $oRecipient = Get-Recipient $sTgtGuid -ea SilentlyContinue
+                    if ($null -ne $oRecipient)
+                    {
+                        #-- Add the owner to the DL
+                        if ($sAcceptList -notmatch $oRecipient.Name)
+                        {
+                            Write-Host "  Adding accept-list: " -NoNewline -ForegroundColor Green
+                            Write-Host $oWork.TgtGuid $oRecipient.DisplayName
+                            Set-DistributionGroup $oWork.TgtGuid -AcceptMessagesOnlyFromSendersOrMembers @{Add=$($sTgtGuid)} -BypassSecurityGroupManagerCheck 
+                        }
+                    }
+                    else 
+                    {
+                        LogError $oTmp.Guid $oTmp.RecipientTypeDetails $sTgtGuid $null "Accept-list target not found"
+                    }
+                }
+                else
+                {
+                    LogError $oTmp.Guid $oTmp.RecipientTypeDetails $null $null "Accept-list source not found"
+                }
+            }
+        }
+
+        #-- Update if this DL is hidden or not
+        if ($hDLs.ContainsKey($oWork.SrcGuid))
+        {
+            $oSourceDL = $hDLs[$oWork.SrcGuid]
+            $sHidden = $oSourceDL.HiddenFromAddressListsEnabled
+            if ($oDL.HiddenFromAddressListsEnabled -and $sHidden -eq "False")
+            {
+                Write-Host "  Updating HiddenFromAddressListsEnabled: " -NoNewline -ForegroundColor Green
+                Write-Host "From" $oDL.HiddenFromAddressListsEnabled.ToString() "To" $sHidden
+                $null = Set-DistributionGroup $oWork.TgtGuid -HiddenFromAddressListsEnabled:$false
+            }
+            if (-not $oDL.HiddenFromAddressListsEnabled -and $sHidden -eq "True")
+            {
+                Write-Host "  Updating HiddenFromAddressListsEnabled: " -NoNewline -ForegroundColor Green
+                Write-Host "From" $oDL.HiddenFromAddressListsEnabled.ToString() "To" $sHidden
+                $null = Set-DistributionGroup $oWork.TgtGuid -HiddenFromAddressListsEnabled:$true
+            }
+        }
+        #-- Troubleshooting, break after N items processed
+        #if ($nCtr -ge 1) {break}
+    }
+    Write-Progress -Activity "Updating DL Properties" -Completed
 }
 
 #------------------------------------------------------------------------------
@@ -189,7 +357,6 @@ function CreateMemberMapping
     $rWork | ForEach-Object {$hTmp.Add($_.SrcGuid, $_)}
     $nCtr = 0
     $nCount = 0
-    #$ProgressPreference = "Continue"  #-- Re-enable the progress bar in Write-Progress
     foreach ($oItem in $rMembers)
     {
         #-- Show progress and bypass certain items
@@ -218,15 +385,16 @@ function CreateMemberMapping
     Write-Progress -Activity "Mapping DL Members" -Completed
     Write-Host "  New DL members found:" $nCount
 
-    #-- Update the target mailboxes
+    #-- Update the source/target mailboxes
     $rMapping = Import-Csv $script:sMappingFile
     $hTmp = @{}
-    $rMapping | ForEach-Object {if ($_.srcguid.Length -gt 0) {$hTmp.Add($_.srcguid, $_.tgtemail)}}
+    $rMapping | ForEach-Object {if ($_.caesguid.Length -gt 0) {$hTmp.Add($_.caesguid, $_.honemail)}}
     $nCountMapped = 0
     $nCountFound = 0
     $nCtr = 0
     foreach ($oItem in $rMembers)
     {
+        #if (1) {continue}  #-- Bypass this section for now
         #-- Show progress, bypass certain items
         $nCtr++
         if ($oItem.SrcType -notmatch "Mailbox") {continue}
@@ -239,8 +407,9 @@ function CreateMemberMapping
             $nCountMapped++
             $sTgtEmail = $hTmp[$oItem.SrcGuid]
             $oTmp = $null
-            $oTmp = Get-Recipient $sTgtEmail -ea SilentlyContinue
-            if ($null -ne $oTmp)
+            $oTmp = Get-ExoMailbox $sTgtEmail -ea SilentlyContinue
+            #-- Do not change if the target is not a mailbox-type
+            if ($null -ne $oTmp -and $oTmp.RecipientTypeDetails -in ("UserMailbox", "SharedMailbox"))
             {
                 $oItem.TgtGuid = $oTmp.Guid.ToString()
                 $oItem.TgtEmail = $oTmp.PrimarySmtpAddress
@@ -252,7 +421,7 @@ function CreateMemberMapping
     Write-Progress -Activity "Mapping Mailbox Members" -Completed
     Write-Host "  New mailbox/mailuser members found:" $nCountFound "Mapped:" $nCountMapped
 
-    #-- Update that target contacts
+    #-- Update that source/target contacts
     $rWork = Import-Csv .\exp-contacts.csv
     $hTmp = @{}
     $rWork | ForEach-Object {$hTmp.Add($_.Guid, $_.PrimarySmtpAddress)}
@@ -261,6 +430,7 @@ function CreateMemberMapping
     $nCtr = 0
     foreach ($oItem in $rMembers)
     {
+        if (1) {continue}  #-- Bypass this section for now
         #-- Show progress and bypass certain items
         $nCtr++
         if ($oItem.SrcType -notmatch "MailContact") {continue}
@@ -304,19 +474,24 @@ function CreateMailContacts
     $rMembers | ForEach-Object {$hMembers.Add($_.SrcGuid, $_)}
 
     #-- Loop thru our user-mapping file
+    $nCtr = 0
     $nCountCreated = 0
     foreach ($oMap in $rMappings)
     {
+        #-- Show progress and bypass certain items
+        $nCtr++
+        Write-Progress -Activity "Creating mail contacts" -Status '.' -PercentComplete ($nCtr * 100 / $rMappings.Count)
+
         #-- Check if the email is valid
-        $sSrcEmail = $oMap.srcemail.Trim()
+        $sSrcEmail = $oMap.caesemail.Trim()
         if ($sSrcEmail.Length -eq 0) {continue}
 
         #-- Check if the source guid is valid and find the member data
-        if ($oMap.srcguid.Trim.Length -eq 0) {continue}
-        if (-not $hMembers.ContainsKey($oMap.srcguid)) {continue}
+        if ($oMap.caesguid.Trim.Length -eq 0) {continue}
+        if (-not $hMembers.ContainsKey($oMap.caesguid)) {continue}
 
         #-- Check if the user is already defined in the target
-        $oMember = $hMembers[$oMap.srcguid]
+        $oMember = $hMembers[$oMap.caesguid]
         if ($oMember.TgtGuid.Length -gt 0) {continue}
 
         #-- Create a new mail contact or assign the existing one
@@ -326,9 +501,9 @@ function CreateMailContacts
         {
             #-- Create the mail contact
             Write-Host "  Creating mail contact:" $sSrcEmail
-            $sAlias = "src_" + (-join ((48..57) + (97..122) | Get-Random -Count 10 | ForEach-Object {[char]$_}))
-            $null = New-MailContact -Alias $sAlias -Name $sAlias -DisplayName $sAlias -ExternalEmailAddress $sSrcEmail
-            $null = Set-MailContact $sAlias -CustomAttribute15 "src-mail-contact" -HiddenFromAddressListsEnabled:$true
+            $sAlias = "caes_" + (-join ((48..57) + (97..122) | Get-Random -Count 10 | ForEach-Object {[char]$_}))
+            $null = New-MailContact -Alias $sAlias -Name $sSrcEmail -DisplayName $sSrcEmail -ExternalEmailAddress $sSrcEmail
+            $null = Set-MailContact $sAlias -CustomAttribute15 "caes-mail-contact" -HiddenFromAddressListsEnabled:$true
             $nCountCreated++
         }
         #-- Confirm if new contact was created or get the existing object
@@ -341,8 +516,8 @@ function CreateMailContacts
             #-- Flag a warning if the object is not a mail contact
             if ($oTmp.RecipientTypeDetails -ne "MailContact") {Write-Host "  WARNING: Object is not a mail contact:" $sSrcEmail -ForegroundColor Yellow}
         }
-        if ($nCountCreated -gt 500) {break}  #-- Limit the number of contacts created
     }
+    Write-Progress -Activity "Creating mail contacts" -Completed
     Write-Host "  Mail contacts created:" $nCountCreated
 
     #-- Save the member ojects
@@ -354,7 +529,7 @@ function CreateMailContacts
 #------------------------------------------------------------------------------
 function RemoveMailContacts
 {
-    Write-Host "Removing mail contacts for mailboxes that are migrated" -ForegroundColor Green
+    Write-Host "Removing mail contacts for mailboxes that are fully migrated" -ForegroundColor Green
 
     #-- Get all the dl-member objects and the mapping file
     $rMembers = Import-Csv $script:sMembersFile
@@ -372,27 +547,32 @@ function RemoveMailContacts
         Write-Progress -Activity "Removing mail contacts" -Status '.' -PercentComplete ($nCtr * 100 / $rMappings.Count)
 
         #-- Check if the email is valid
-        $sSrcEmail = $oMap.srcemail.Trim()
+        $sSrcEmail = $oMap.caesemail.Trim()
         if ($sSrcEmail.Length -eq 0) {continue}
 
         #-- Check if the source guid is valid and find the member data
-        if ($oMap.srcguid.Trim.Length -eq 0) {continue}
-        if (-not $hMembers.ContainsKey($oMap.srcguid)) {continue}
+        if ($oMap.caesguid.Trim.Length -eq 0) {continue}
+        if (-not $hMembers.ContainsKey($oMap.caesguid)) {continue}
 
         #-- Get the member data
-        if ($hMembers.ContainsKey($oMap.srcguid))
+        if ($hMembers.ContainsKey($oMap.caesguid))
         {
-            $oMember = $hMembers[$oMap.srcguid]
+            $oMember = $hMembers[$oMap.caesguid]
             if ($oMember.TgtGuid.Length -gt 0 -and $oMember.TgtType -match "Mailbox")
             {
-                #-- Check if the source email is a mail contact
-                $oTmp = Get-MailContact $sSrcEmail -ea SilentlyContinue
-                if ($null -ne $oTmp)
+                #-- Check if the mailbox forwarding address is NOT set
+                $oTmp = Get-Mailbox $oMember.TgtGuid -ea SilentlyContinue
+                if (($null -ne $oTmp) -and ($null -eq $oTmp.ForwardingAddress))
                 {
-                    #-- Remove the mail contact
-                    Write-Host "  Removing mail contact:" $sSrcEmail
-                    #Remove-MailContact -Identity $sSrcEmail -Confirm:$false
-                    $nCountRemoved++
+                    #-- Check if the source email is a mail contact
+                    $oTmp = Get-MailContact $sSrcEmail -ea SilentlyContinue
+                    if ($null -ne $oTmp)
+                    {
+                        #-- Remove the mail contact
+                        Write-Host "  Removing mail contact:" $sSrcEmail
+                        $null = Remove-MailContact -Identity $sSrcEmail -Confirm:$false
+                        $nCountRemoved++
+                    }
                 }
             }
         }
@@ -414,8 +594,6 @@ function UpdateMembers
 
     #-- Loop thru our list of DLs
     $nCtr = 0
-    $nCount = 0
-    $rErrors = @()
     foreach ($oWork in $rWork)
     {
         #-- Show progress and bypass certain items
@@ -430,68 +608,86 @@ function UpdateMembers
         
         #-- Get the list of members from the source
         $rSrcMembers = $rExportedMembers | Where-Object {$_.DLGuid -eq $oWork.SrcGuid}
-        Write-Host " " $oWork.TgtGuid -NoNewline
-        Write-Host " - $($rSrcMembers.Count) members"
 
         #-- Convert the source GUID to target GUID
-        $rSrcGuids = @()
+        $rTgtMemberGuids = @()
         foreach ($oSrcMember in $rSrcMembers)
         {
             $sTargetGuid = GetTargetGuid $oSrcMember.Guid
-            if ($null -ne $sTargetGuid)
-            {
-                #Write-Host $oSrcMember.Guid "->" $sTargetGuid
-                $rSrcGuids += $sTargetGuid
-            }
-            else
-            {
-                $rErrors += [PSCustomObject]@{
-                    SrcGuid = $oSrcMember.Guid
-                    SrcType = $oSrcMember.RecipientTypeDetails
-                    State = "Error"
-                    Error = "Member not found in source"
-                }
-            }
+            if ($null -ne $sTargetGuid) {$rTgtMemberGuids += $sTargetGuid}
+            else {LogError $oSrcMember.Guid $oSrcMember.RecipientTypeDetails $null $null "Target member not found"}
         }
 
         #-- Add new members to the DL
         $hTgtMembers = @{}
         $rTgtMembers | ForEach-Object {$hTgtMembers.Add($_.Guid.ToString(), 1)}
-        foreach ($sSrcGuid in $rSrcGuids)
+        foreach ($sTgtMemberGuid in $rTgtMemberGuids)
         {
-            if (-not $hTgtMembers.ContainsKey($sSrcGuid))
+            if (-not $hTgtMembers.ContainsKey($sTgtMemberGuid))
             {
                 #-- Add the member to the DL
                 Write-Host "    Adding: " -ForegroundColor Green -NoNewline
-                Write-Host $sSrcGuid
-                $null = Add-DistributionGroupMember -Identity $oDL.Identity -Member $sSrcGuid -Confirm:$false
+                $oTmp = Get-ExoRecipient $sTgtMemberGuid
+                Write-Host $oTmp.DisplayName $oTmp.RecipientTypeDetails
+                $null = Add-DistributionGroupMember -Identity $oDL.Identity -Member $sTgtMemberGuid -Confirm:$false -BypassSecurityGroupManagerCheck
             }
         }
 
         #-- Remove members that are not in the source DL
-        $hSrcGuids = @{}
-        $rSrcGuids | ForEach-Object {$hSrcGuids.Add($_, 1)}
+        $hTgtMemberGuids = @{}
+        $rTgtMemberGuids | ForEach-Object {$hTgtMemberGuids.Add($_, 1)}
         foreach ($oTgtMember in $rTgtMembers)
         {
-            if (-not $hSrcGuids.ContainsKey($oTgtMember.Guid.ToString()))
+            if (-not $hTgtMemberGuids.ContainsKey($oTgtMember.Guid.ToString()))
             {
                 #-- Remove the member from the DL
                 Write-Host "    Removing: " -ForegroundColor Green -NoNewline
-                Write-Host $oTgtMember.DisplayName
-                $null = Remove-DistributionGroupMember -Identity $oDL.Identity -Member $oTgtMember.Guid.ToString() -Confirm:$false
+                Write-Host $oTgtMember.DisplayName $oTgtMember.RecipientTypeDetails
+                $null = Remove-DistributionGroupMember -Identity $oDL.Identity -Member $oTgtMember.Guid.ToString() -Confirm:$false -BypassSecurityGroupManagerCheck
             }
         }
-
-        #-- For testing, stop at a breakpoint
-        $nCount++
-        if ($nCount -ge 200) {break}
-    }
-    if ($rErrors.Count -gt 0)
-    {
-        Write-Host "  Errors found:" $rErrors.Count
-        $rErrors | Export-Csv ".\dl_errors.csv" -NoTypeInformation
     }
     Write-Progress -Activity "Updating DL Members" -Completed
+}
+
+#------------------------------------------------------------------------------
+#-- Log an error
+#------------------------------------------------------------------------------
+function LogError
+{
+    param (
+        [string]$sSrcGuid,
+        [string]$sSrcType,
+        [string]$sTgtGuid,
+        [string]$sTgtType,
+        [string]$sError
+    )
+    $oError = [PSCustomObject]@{
+        SrcGuid = $sSrcGuid
+        SrcType = $sSrcType
+        TgtGuid = $sTgtGuid
+        TgtType = $sTgtType
+        Error = $sError
+    }
+    $script:rErrors += $oError
+}
+
+#------------------------------------------------------------------------------
+#-- Analyze the error logs
+#------------------------------------------------------------------------------
+function AnalyzeErrors
+{
+    Write-Host "Analyzing the error logs" -ForegroundColor Green
+
+    #-- Get the error logs
+    $rErrors = Import-Csv ".\dl_errors.csv"
+    $rTmp = @(); $h = @{}; $rErrors | ForEach-Object {$sKey = $_.SrcGuid; if (-not $h.ContainsKey($sKey)) {$h.Add($sKey,1); $rTmp += $_}}
+    $h = @{}; $rTmp | ForEach-Object {$sKey = $_.SrcType; if ($h.ContainsKey($sKey)) {$h[$sKey]++} else {$h.Add($sKey,1)}}; $h.GetEnumerator() | Sort-Object Value
+
+    $hTmp = @{}; $rErrors | ForEach-Object {$sKey = $_.Error; if (-not $hTmp.Contains($sKey)) {$hTmp.Add($sKey, 1)} else {$hTmp[$sKey]++}}
+    Write-Host "  Total errors found:" $rErrors.Count
+    Write-Host "  Errors by type:"
+    foreach ($sKey in $hTmp.Keys) {Write-Host "   " $sKey ":" $hTmp[$sKey]}
 }
 
 #------------------------------------------------------------------------------
@@ -500,14 +696,27 @@ function UpdateMembers
 $PSStyle.Progress.View = "Minimal"  #-- Other values: "Classic"
 $ProgressPreference = "Continue"
 
-UpdateWorkFile  #-- Update the list of src DLs to create or delete from target
-if ((Read-Host "  Creating a member mapping for 6k objects can take an hour, do you want to proceed? (yes/no)").Trim().ToLower() -match "y") {CreateMemberMapping}  #-- Update the mapping file with source and target members
+UpdateWorkFile      #-- Update the list of CAES DLs to create or delete from target
+CreateDL            #-- Create the new DLs in the target
 
-#CreateDL
-#CreateMailContacts  #-- Will create mail contacts for users not yet migrated to target
-#RemoveMailContacts  #-- Will remove mail contacts for users that are migrated
-UpdateMembers
+if ((Read-Host "  Manage the mail-contacts? (yes/no)").Trim().ToLower() -match "y")
+{
+    CreateMailContacts  #-- Will create mail contacts for users not yet migrated to target
+    RemoveMailContacts  #-- Will remove mail contacts for users that are migrated
+}
 
-#-- Show stats for our work file
-#$rWork = Import-Csv $sWorkFile
-#$h = @{}; $rWork | ForEach-Object {$sKey = $_.State; if (-not $h.Contains($sKey)) {$h.Add($sKey, 1)} else {$h[$sKey]++}}; $h
+if ((Read-Host "  Creating a member mapping can take an hour, do you want to proceed? (yes/no)").Trim().ToLower() -match "y")
+{
+    CreateMemberMapping  #-- Update the mapping file with source and target members
+}
+
+if ((Read-Host "  Update the DL properties and members? (yes/no)").Trim().ToLower() -match "y")
+{
+    UpdateDLProperties  #-- Update the properties of the DLs
+    UpdateMembers
+}
+
+#-- Cleanup
+$script:rErrors | Export-Csv ".\dl_errors.csv" -NoTypeInformation
+Remove-Variable hSrcTgtGuidLookup -ea SilentlyContinue
+Remove-Variable rErrors -ea SilentlyContinue
