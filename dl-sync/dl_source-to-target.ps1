@@ -591,6 +591,7 @@ function UpdateMembers
     #-- Get the working file and DL member mappings
     $rWork = Import-Csv $script:sWorkFile
     $rExportedMembers = Import-Csv .\exp-dls-members.csv
+    $rDoNotRemoveAsMembers = Get-Content .\dl_bypass-removal-members.txt | Where-Object {$_ -notlike "#*"}
 
     #-- Loop thru our list of DLs
     $nCtr = 0
@@ -640,6 +641,8 @@ function UpdateMembers
         {
             if (-not $hTgtMemberGuids.ContainsKey($oTgtMember.Guid.ToString()))
             {
+                #-- Bypass certain members from removal
+                if ($oTgtMember.Guid.ToString() -in $rDoNotRemoveAsMembers) {continue}
                 #-- Remove the member from the DL
                 Write-Host "    Removing: " -ForegroundColor Green -NoNewline
                 Write-Host $oTgtMember.DisplayName $oTgtMember.RecipientTypeDetails
