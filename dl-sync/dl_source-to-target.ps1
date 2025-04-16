@@ -503,7 +503,7 @@ function CreateMailContacts
             Write-Host "  Creating mail contact:" $sSrcEmail
             $sAlias = "caes_" + (-join ((48..57) + (97..122) | Get-Random -Count 10 | ForEach-Object {[char]$_}))
             $null = New-MailContact -Alias $sAlias -Name $sSrcEmail -DisplayName $sSrcEmail -ExternalEmailAddress $sSrcEmail
-            $null = Set-MailContact $sAlias -CustomAttribute15 "caes-mail-contact" -HiddenFromAddressListsEnabled:$true
+            $null = Set-MailContact $sAlias -CustomAttribute15 "caes-mail-contact" -HiddenFromAddressListsEnabled:$false
             $nCountCreated++
         }
         #-- Confirm if new contact was created or get the existing object
@@ -579,6 +579,42 @@ function RemoveMailContacts
     }
     Write-Progress -Activity "Removing mail contacts" -Completed
     Write-Host "  Mail contacts removed:" $nCountRemoved
+}
+
+#------------------------------------------------------------------------------
+#-- Ensure the mailuser is hidden, and the mailcontact is visible from the GAL
+#------------------------------------------------------------------------------
+function UpdateMailObjectVisibility
+{
+    Write-Host "Updating mailuser and mailcontact visibility" -ForegroundColor Green
+
+    #-- Get the working file
+    $rMapping = Import-Csv $script:sMappingFile
+    $nCtr = 0
+    foreach ($oMap in $rMapping)
+    {
+        #-- Show progress and bypass certain items
+        $nCtr++
+        Write-Progress -Activity "Updating mail object visibility" -Status $oMap.hid -PercentComplete ($nCtr * 100 / $rMapping.Count)
+        $oMailUser = $null
+        $oMailUser = Get-MailUser $oMap.honemail -ea SilentlyContinue
+        $oMailContact = $null
+        $oMailContact = Get-MailContact $oMap.caesemail -ea SilentlyContinue
+        if ($null -eq $oMailUser -or $null -eq $oMailContact) {continue}  #-- We don't have both objects
+        if ($oMailUser.HiddenFromAddressListsEnabled -eq $false)
+        {
+            Write-Host "  Updating mailuser visibility: " -NoNewline -ForegroundColor Green
+            Write-Host $oMailUser.DisplayName
+            $null = Set-MailUser $oMailUser.Identity -HiddenFromAddressListsEnabled:$true
+        }
+        if ($oMailContact.HiddenFromAddressListsEnabled -eq $true)
+        {
+            Write-Host "  Updating mailcontact visibility: " -NoNewline -ForegroundColor Green
+            Write-Host $oMailContact.DisplayName
+            $null = Set-MailContact $oMailContact.Identity -HiddenFromAddressListsEnabled:$false
+        }
+    }
+    Write-Progress -Activity "Updating mail object visibility" -Completed
 }
 
 #------------------------------------------------------------------------------
@@ -706,6 +742,11 @@ if ((Read-Host "  Manage the mail-contacts? (yes/no)").Trim().ToLower() -match "
 {
     CreateMailContacts  #-- Will create mail contacts for users not yet migrated to target
     RemoveMailContacts  #-- Will remove mail contacts for users that are migrated
+}
+
+if ((Read-Host "  Update the mail object visibility? (yes/no)").Trim().ToLower() -match "y")
+{
+    UpdateMailObjectVisibility  #-- Ensure the mailuser is hidden, and the mailcontact is visible from the GAL
 }
 
 if ((Read-Host "  Creating a member mapping can take an hour, do you want to proceed? (yes/no)").Trim().ToLower() -match "y")
