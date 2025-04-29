@@ -115,7 +115,7 @@ function CreateDL
 
             #-- Bypass if the DL is hidden, is roomlist, except in our "force create" list
             $bBypass = $false
-            if ($oDL.HiddenFromAddressListsEnabled -eq "true") {$bBypass = $true}
+            #if ($oDL.HiddenFromAddressListsEnabled -eq "true") {$bBypass = $true}
             if ($oDL.RecipientTypeDetails -eq "RoomList") {$bBypass = $true}
             [array]$rTmp = (Get-Content dl_force-create-these.txt | Where-Object {$_.Trim() -notlike "#*"})
             if ($oItem.SrcGuid -in $rTmp) {$bBypass = $false}
@@ -159,7 +159,7 @@ function CreateDL
                 $oItem.Error = "Failed to create new DL"
                 $oItem.LastUpdate = (Get-Date).ToString()
             }
-            if ($nCount -ge 50) {break}  #-- Limit the number of DLs created
+            if ($nCount -ge 150) {break}  #-- Limit the number of DLs created
         }
     }
     Write-Host "  New DLs: $nCount"
@@ -569,7 +569,7 @@ function RemoveMailContacts
                     if ($null -ne $oTmp)
                     {
                         #-- Remove the mail contact
-                        Write-Host "  Removing mail contact:" $sSrcEmail
+                        Write-Host "  Removed mail contact:" $sSrcEmail
                         $null = Remove-MailContact -Identity $sSrcEmail -Confirm:$false
                         $nCountRemoved++
                     }
@@ -591,7 +591,7 @@ function UpdateMailObjectVisibility
     #-- Get the working file
     $rMapping = Import-Csv $script:sMappingFile
     $nCtr = 0
-    foreach ($oMap in $rMapping)
+    foreach ($oMap in $rMapping[1999..2415])
     {
         #-- Show progress and bypass certain items
         $nCtr++
@@ -738,23 +738,23 @@ $ProgressPreference = "Continue"
 UpdateWorkFile      #-- Update the list of CAES DLs to create or delete from target
 CreateDL            #-- Create the new DLs in the target
 
-if ((Read-Host "  Manage the mail-contacts? (yes/no)").Trim().ToLower() -match "y")
+if ((Read-Host "  Manage the mail-contacts? (Y/N)").Trim().ToLower() -match "y")
 {
     CreateMailContacts  #-- Will create mail contacts for users not yet migrated to target
     RemoveMailContacts  #-- Will remove mail contacts for users that are migrated
 }
 
-if ((Read-Host "  Update the mail object visibility? (yes/no)").Trim().ToLower() -match "y")
+if ((Read-Host "  Update the mail object visibility? (Y/N)").Trim().ToLower() -match "y")
 {
     UpdateMailObjectVisibility  #-- Ensure the mailuser is hidden, and the mailcontact is visible from the GAL
 }
 
-if ((Read-Host "  Creating a member mapping can take an hour, do you want to proceed? (yes/no)").Trim().ToLower() -match "y")
+if ((Read-Host "  Creating a member mapping can take an hour, do you want to proceed? (Y/N)").Trim().ToLower() -match "y")
 {
     CreateMemberMapping  #-- Update the mapping file with source and target members
 }
 
-if ((Read-Host "  Update the DL properties and members? (yes/no)").Trim().ToLower() -match "y")
+if ((Read-Host "  Update the DL properties and members? (Y/N)").Trim().ToLower() -match "y")
 {
     UpdateDLProperties  #-- Update the properties of the DLs
     UpdateMembers
