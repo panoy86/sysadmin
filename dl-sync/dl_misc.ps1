@@ -1,8 +1,40 @@
+$script:sMembersFile = ".\dl_members-source-target.csv"
+
+#------------------------------------------------------------------------------
+#-- Aux function to return the target GUID, based on the source GUID
+#------------------------------------------------------------------------------
+function GetTargetGuid
+{
+    param (
+        [string]$sSrcGuid
+    )
+    #-- Create a lookup table for source and target GUIDs
+    if ($null -eq (Get-Variable -Name hSrcTgtGuidLookup -ea SilentlyContinue))
+    {
+        $script:hSrcTgtGuidLookup = @{}  #-- Create a new hashtable
+        Import-Csv $script:sMembersFile | ForEach-Object {
+            if ($_.SrcGuid.Length -gt 0 -and $_.TgtGuid.Length -gt 0)
+            {
+                $script:hSrcTgtGuidLookup.Add($_.SrcGuid, $_.TgtGuid)
+            }
+        }
+    }
+
+    #-- Check if the source GUID is in the lookup table
+    if ($script:hSrcTgtGuidLookup.ContainsKey($sSrcGuid))
+    {
+        return $script:hSrcTgtGuidLookup[$sSrcGuid]
+    } 
+    return $null
+}
+
 #-- Adds new entries to the mapping file (e.g., new hires)
 function UpdateMappingFile_AddNew
 {
-    #-- Add new entries to our mapping file
-    $sAddFile = "c:\temp\zz.csv"  #-- Expect 3 columns: hid, honemail, caesemail
+    #-- Add new entries to our mapping file, check if it exist othwerwise exit
+    $sAddFile = ".\add.csv"  #-- Expect 3 columns: hid, honemail, caesemail
+    if (-not (Test-Path $sAddFile)) {Write-Host "File" $sAddFile "not found"; return}
+    #-- Get the mapping file
     $sFile = ".\dl_users-mapping.csv"
     $r = Import-Csv $sFile
     $rAdd = Import-Csv $sAddFile
@@ -62,7 +94,7 @@ function UpdateMappingFile_CaesGUID
 }
 
 #-- Update the CU properties for the mail contacts
-function SetCU4MailContacts
+function SetMailContactProperties
 {
     $rm = Import-Csv .\dl_users-mapping.csv
     $rmc = @()
@@ -100,10 +132,11 @@ function SetCU4MailContacts
         if ($oSrc.CustomAttribute10 -ne $oTgt.CustomAttribute10) {$bChange = $true}
         if ($oSrc.CustomAttribute11 -ne $oTgt.CustomAttribute11) {$bChange = $true}
         if ($oSrc.CustomAttribute12 -ne $oTgt.CustomAttribute12) {$bChange = $true}
+        if ($oSrc.DisplayName -ne $oTgt.DisplayName) {$bChange = $true}
         if ($bChange -eq $true)
         {
             Write-Host "Updating $($oTgt.PrimarySmtpAddress)"
-            Set-MailContact -Identity $oTgt.Guid.ToString() -CustomAttribute1 $oSrc.CustomAttribute1 -CustomAttribute2 $oSrc.CustomAttribute2 -CustomAttribute3 $oSrc.CustomAttribute3 -CustomAttribute4 $oSrc.CustomAttribute4 -CustomAttribute5 $oSrc.CustomAttribute5 -CustomAttribute6 $oSrc.CustomAttribute6 -CustomAttribute7 $oSrc.CustomAttribute7 -CustomAttribute8 $oSrc.CustomAttribute8 -CustomAttribute9 $oSrc.CustomAttribute9 -CustomAttribute10 $oSrc.CustomAttribute10 -CustomAttribute11 $oSrc.CustomAttribute11 -CustomAttribute12 $oSrc.CustomAttribute12 -ea SilentlyContinue
+            Set-MailContact -Identity $oTgt.Guid.ToString() -CustomAttribute1 $oSrc.CustomAttribute1 -CustomAttribute2 $oSrc.CustomAttribute2 -CustomAttribute3 $oSrc.CustomAttribute3 -CustomAttribute4 $oSrc.CustomAttribute4 -CustomAttribute5 $oSrc.CustomAttribute5 -CustomAttribute6 $oSrc.CustomAttribute6 -CustomAttribute7 $oSrc.CustomAttribute7 -CustomAttribute8 $oSrc.CustomAttribute8 -CustomAttribute9 $oSrc.CustomAttribute9 -CustomAttribute10 $oSrc.CustomAttribute10 -CustomAttribute11 $oSrc.CustomAttribute11 -CustomAttribute12 $oSrc.CustomAttribute12 -DisplayName $oSrc.DisplayName -ea SilentlyContinue
             $nCount++
         }
     }
@@ -112,12 +145,101 @@ function SetCU4MailContacts
     Write-Host "Total number of updated mail contacts:" $nCount
 }
 
+#-- Update the members of the static DLs representing the dynamic DLs from the source tenant
+function UpdateStaticDLs
+{
+    $rd = Import-Csv .\ddl-manually-created.csv
+    $rm = Import-Csv .\exp-mbx.csv
+    foreach ($d in $rd)
+    {
+        #-- Bypass certain static DLs
+        if ($d.Name -notmatch "Users") {continue}
+        $sLid = ($d.Name -split '\.')[0]
+        if ($sLid -in ("CAES", "Frontgrade")) {continue}
+        Write-Host $d.Name
+        #-- Get the existing members of the static DL
+        $oDist = Get-DistributionGroup $d.Name -ea SilentlyContinue
+        if ($null -eq $oDist) {continue}
+        $rTmp = Get-DistributionGroupMember -Identity $oDist.Guid.ToString() -ResultSize 5000 -ea SilentlyContinue
+        $hPresentMembers = @{}
+        $rTmp | ForEach-Object {$hPresentMembers.Add($_.Guid.Tostring(), 1)}
+        #-- Loop thru our mailboxes' OU
+        $rMembers = @()
+        foreach ($m in $rm)
+        {
+            if ($m.OrganizationalUnit -match $sLid) {$rMembers += $m}
+        }
+        #-- Brute-force add the members to the static DL
+        $nCount = 0
+        foreach ($oMember in $rMembers)
+        {
+            $sTgtGuid = GetTargetGuid $oMember.Guid.ToString()            
+            if ($null -eq $sTgtGuid) {} #Write-Host "  " $oMember.Guid.ToString()}
+            else
+            {
+                #-- Check if the member is already present in the static DL
+                if (-not $hPresentMembers.ContainsKey($sTgtGuid))
+                {
+                    Write-Progress -Activity "Adding members" -Status ($oMember.Guid.ToString() + " -> " + $sTgtGuid)
+                    Add-DistributionGroupMember -Identity $d.Name -Member $sTgtGuid -BypassSecurityGroupManagerCheck -ea SilentlyContinue
+                    $nCount++
+                }
+            }
+        }
+        Write-Host "  " $nCount "found/added, total from source:" $rMembers.Count
+
+        #-- Lazy way to remove the mail-contacts from the static DL, where the mailbox is already a member
+        $rTmp = Get-DistributionGroupMember -Identity $oDist.Guid.ToString() -ResultSize 5000 -ea SilentlyContinue
+        $hPresentMembers = @{}
+        $rTmp | ForEach-Object {$hPresentMembers.Add($_.Guid.Tostring(), 1)}
+        $nCount = 0
+        foreach ($oMember in $rTmp)
+        {
+            if ($oMember.RecipientTypeDetails -eq "UserMailbox")
+            {
+                $oMailbox = $null
+                $oMailbox = Get-Mailbox $oMember.Guid.ToString() -ea SilentlyContinue
+                if (($null -ne $oMailbox) -and ($null -ne $oMailbox.ForwardingAddress))
+                {
+                    $oContact = $null
+                    $oContact = Get-MailContact $oMailbox.ForwardingAddress -ea SilentlyContinue
+                    if (($null -ne $oContact) -and $hPresentMembers.ContainsKey($oContact.Guid.ToString()))
+                    {
+                        Write-Progress -Activity "Removing forwarders as members" -Status $oContact.PrimarySmtpAddress.ToString()
+                        Remove-DistributionGroupMember -Identity $oDist.Guid.ToString() -Member $oContact.Guid.ToString() -BypassSecurityGroupManagerCheck -Confirm:$false -ea SilentlyContinue
+                        $nCount++
+                    }
+                }
+            }
+        }
+        Write-Progress -Activity "Removing forwarders as members" -Completed
+        Write-Host "  " $nCount "forwarders removed from static DL"
+    }
+}
 
 #-- Main
 $PSStyle.Progress.View = "Minimal"  #-- Other values: "Classic"
 $ProgressPreference = "Continue"
 
-#UpdateMappingFile_AddNew
-#UpdateMappingFile_CaesGUID
-SetCU4MailContacts
+if ((Read-Host "Update the static DLs representation of the CAES dynamic DLs? (Y/N)").ToUpper() -eq 'Y')
+{
+    UpdateStaticDLs
+}
+
+Write-Host "You can add new entries to the mapping file" -ForegroundColor Green
+Write-Host "Just create a CSV file called add.csv with the following columns:" -ForegroundColor Green
+Write-Host "hid,honemail,caesemail" -ForegroundColor Yellow
+if ((Read-Host "Add new entries to the mapping file? (Y/N)").ToUpper() -eq 'Y')
+{
+    UpdateMappingFile_AddNew
+}
+if ((Read-Host "Update the mapping file with caes-guid? (Y/N)").ToUpper() -eq 'Y')
+{
+    UpdateMappingFile_CaesGUID
+}
+if ((Read-Host "Update the mail contact properties? (Y/N)").ToUpper() -eq 'Y')
+{
+    SetMailContactProperties
+}
+Remove-Variable hSrcTgtGuidLookup
 #-- End of script
