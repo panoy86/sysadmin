@@ -663,10 +663,14 @@ function UpdateMembers
             if (-not $hTgtMembers.ContainsKey($sTgtMemberGuid))
             {
                 #-- Add the member to the DL
-                Write-Host "    Adding: " -ForegroundColor Green -NoNewline
-                $oTmp = Get-ExoRecipient $sTgtMemberGuid
-                Write-Host $oTmp.DisplayName $oTmp.RecipientTypeDetails
-                $null = Add-DistributionGroupMember -Identity $oDL.Identity -Member $sTgtMemberGuid -Confirm:$false -BypassSecurityGroupManagerCheck
+                $oTmp = $null
+                $oTmp = Get-ExoRecipient $sTgtMemberGuid -ea SilentlyContinue
+                if ($null -ne $oTmp)
+                {
+                    Write-Host "    Adding: " -ForegroundColor Green -NoNewline
+                    Write-Host $oTmp.DisplayName $oTmp.RecipientTypeDetails
+                    $null = Add-DistributionGroupMember -Identity $oDL.Identity -Member $sTgtMemberGuid -Confirm:$false -BypassSecurityGroupManagerCheck -ea SilentlyContinue
+                }
             }
         }
 
@@ -682,7 +686,7 @@ function UpdateMembers
                 #-- Remove the member from the DL
                 Write-Host "    Removing: " -ForegroundColor Green -NoNewline
                 Write-Host $oTgtMember.DisplayName $oTgtMember.RecipientTypeDetails
-                $null = Remove-DistributionGroupMember -Identity $oDL.Identity -Member $oTgtMember.Guid.ToString() -Confirm:$false -BypassSecurityGroupManagerCheck
+                $null = Remove-DistributionGroupMember -Identity $oDL.Identity -Member $oTgtMember.Guid.ToString() -Confirm:$false -BypassSecurityGroupManagerCheck -ea SilentlyContinue
             }
         }
     }
