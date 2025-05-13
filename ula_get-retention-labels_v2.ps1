@@ -42,7 +42,7 @@ function Get-PnPOneDriveRetentionLabelReport()
 }
 
 #-- Main script
-$sAdmin = "ftan-a@paypal.com"
+$sAdmin = "ftan-a@some.com"
 $rWork = Get-Content .\list-onedrive-urls.txt
 $rFinal = @()
 $nCountToWorkOn = 4000
