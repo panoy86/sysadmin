@@ -1,7 +1,4 @@
 #-- Script to extract all members of a DL, and members of sub-DLS, etc...
-$rDLs = @()
-$rDls += "some-DL"
-
 #-- Main program, do not change
 $script:hTotalMembers = @{}
 $script:nTotalDLCount = 0
@@ -65,20 +62,31 @@ function Get-DLMembersRecursive
             }
         }
     }
+    else {Write-Host ($sDL + " not found") -ForegroundColor Red}
     Write-Progress -Activity "Finding member DLs" -Completed
 }
 
 #------------------------------------------------------------------------------
 #-- Main
 #------------------------------------------------------------------------------
-$PSStyle.Progress.View = "Minimal"  #-- Other values: "Classic"
+#$PSStyle.Progress.View = "Minimal"  #-- Other values: "Classic", only works in PowerShell 7.2+
 $ProgressPreference = "Continue"
+
+Write-Host "This script will search for members of the specified Distribution Lists (DLs) and their sub-DLs."
+#-- Get input of DLs from the user
+if ($args.Count -gt 0) {$rDLs = $args}
+else
+{
+    Write-Host "Enter the name of the Distribution Lists (DLs) to search, separated by commas:"
+    $sInput = Read-Host
+    $rDLs = $sInput.Split(",")
+}
 
 #-- Loop thru the DLs
 foreach ($sDL in $rDLs)
 {
     $script:hMembers = @{}
-    Get-DLMembersRecursive($sDL)
+    Get-DLMembersRecursive($sDL.Trim())
     Write-Host ($sDL  + " (" + $script:hMembers.Count + ")")
 }
 Write-Host "Total users:" $script:hTotalMembers.Count
