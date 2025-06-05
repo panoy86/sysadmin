@@ -42,7 +42,7 @@ function udf_GetDriveId
     )
 
     #-- Get the site id
-    $sUri = 'https://graph.microsoft.com/v1.0/sites/paypal-my.sharepoint.com:/' + $sRelativeUrl
+    $sUri = 'https://graph.microsoft.com/v1.0/sites/domain-my.sharepoint.com:/' + $sRelativeUrl
     $oAuthHeader = @{'Authorization'="Bearer $token"}
     Try {$oResult = Invoke-RestMethod -Method Get -Headers $oAuthHeader -Uri $sUri -Verbose:$VerbosePreference -ErrorAction SilentlyContinue}
     Catch {return $null}
@@ -88,7 +88,7 @@ function udf_GetSiteId
     )
 
     #-- Get the site id
-    $sUri = 'https://graph.microsoft.com/v1.0/sites/paypal-my.sharepoint.com:/' + $sRelativeUrl
+    $sUri = 'https://graph.microsoft.com/v1.0/sites/domain-my.sharepoint.com:/' + $sRelativeUrl
     $oAuthHeader = @{'Authorization'="Bearer $token"}
     Try {$oResult = Invoke-WebRequest -Method GET -Headers $oAuthHeader -Uri $sUri -ErrorAction Stop}
     Catch {return $null}
