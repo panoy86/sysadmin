@@ -1,7 +1,7 @@
 <#-- Notes
 https://martinday.co/determining-the-last-user-activity-of-a-sharepoint-or-onedrive-site/
 Requires an existing PowerShell session for SPO and PnP
--> Connect-SPOService -Url https://paypal-admin.sharepoint.com
+-> Connect-SPOService -Url https://domain-admin.sharepoint.com
 #>
 
 $sFilename = ".\hpy-site-list.csv"
