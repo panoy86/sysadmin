@@ -1,6 +1,6 @@
 #-- Get the shared links for a given site
 $sUrl = "https://somedomain.sharepoint.com/teams/TurnerDirects"
-Set-SPOUser -Site $sUrl -LoginName ftan-a@paypal.com -IsSiteCollectionAdmin:$true
+Set-SPOUser -Site $sUrl -LoginName ftan-a@somedomain.com -IsSiteCollectionAdmin:$true
 
 #-- Get the lists and choose one (manually)
 Connect-PnPOnline -Url $sUrl -UseWebLogin
