@@ -1,4 +1,4 @@
-Set-Location -Path C:\Scripts\GraphAPI\tio
+#Set-Location -Path C:\Scripts\GraphAPI\
 $PSStyle.Progress.View = "Minimal"  #-- Other value: "Classic", only works in PowerShell 7+
 $ProgressPreference = "Continue"
 
