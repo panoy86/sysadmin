@@ -1,5 +1,5 @@
 #-- Get the shared links for a given site
-$sUrl = "https://paypal.sharepoint.com/teams/TurnerDirects"
+$sUrl = "https://somedomain.sharepoint.com/teams/TurnerDirects"
 Set-SPOUser -Site $sUrl -LoginName ftan-a@paypal.com -IsSiteCollectionAdmin:$true
 
 #-- Get the lists and choose one (manually)
