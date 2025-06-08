@@ -124,7 +124,7 @@ foreach ($sUpn in $rUpns)
     $userOneDrive = Get-MgUserDefaultDrive -UserId $sUpn -ea SilentlyContinue    
     if ($null -eq $userOneDrive)
     {
-        Write-Host "No OneDrive content found for:" $sUpn -ForegroundColor Yellow
+        Write-Host " No OneDrive content found for:" $sUpn -ForegroundColor Yellow
         continue
     }
     
@@ -134,6 +134,7 @@ foreach ($sUpn in $rUpns)
 
     #-- Show stats per user
     if ($script:nPerUserTotal -gt 0) {Write-Host " -> found" $script:nPerUser.Count "with a cumulative folders/files of" $script:nPerUserTotal -ForegroundColor Cyan}
+    else {Write-Host "."}
 }
 
 Write-Host "Total found:" $script:listOverSharedItems.Count
