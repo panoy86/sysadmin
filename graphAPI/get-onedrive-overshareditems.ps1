@@ -2,7 +2,6 @@
 #-- Find-MgGraphCommand -Command get-mguserdrive 
 #-- (Get-MgContext).Scopes -> to check if user/app has the right permissions
 
-$script:tv1 = $null
 $script:listOverSharedItems = @()
 $script:hShareIds = @{}
 $script:nPerUser = 0
@@ -78,7 +77,6 @@ function RecursivelyGetOneDriveItems
     {
         Write-Progress -Activity "Processing item" -Status $item.Name
         CheckOverSharingPermissions -DriveId $DriveId -DriveItemId $item.Id
-        #if ($item.Name -eq "780m.png") {$script:tv1 = $item} #-- debugging
 
         #-- Recursively call this function for folders
         if ($null -ne $item.Folder.ChildCount)
