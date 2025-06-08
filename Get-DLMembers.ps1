@@ -69,7 +69,7 @@ function Get-DLMembersRecursive
 #------------------------------------------------------------------------------
 #-- Main
 #------------------------------------------------------------------------------
-#$PSStyle.Progress.View = "Minimal"  #-- Other values: "Classic", only works in PowerShell 7.2+
+$PSStyle.Progress.View = "Minimal"  #-- Other value: "Classic", only works in PowerShell 7.2+
 $ProgressPreference = "Continue"
 
 Write-Host "This script will search for members of the specified Distribution Lists (DLs) and their sub-DLs."
@@ -104,16 +104,3 @@ $rFinal | ForEach-Object {$rTmp += $_.PrimarySmtpAddress}
 $rTmp | Out-File -Encoding ASCII .\emails-list.txt
 Write-Host "File created: emails-list.txt"
 Write-Host "Members:" $rFinal.Count
-
-<#-- Fix all-upper-case names
-$r1 = @(); $script:hMembers.GetEnumerator()| foreach {$r1 += $_.Value}
-$TextInfo = (Get-Culture).TextInfo
-foreach($t in $r1)
-{
-    #$sTmp = $t.FirstName.Trim()
-    $sTmp = $t.LastName.Trim()
-    if ($sTmp.Length -gt 1 -and $sTmp -cmatch "^[A-Z]*$") {Write-Host $sTmp $TextInfo.ToTitleCase($sTmp.ToLower())}
-    #if ($sTmp.Length -gt 1 -and $sTmp -cmatch "^[A-Z]*$") {$t.FirstName = $TextInfo.ToTitleCase($sTmp.ToLower())}
-    #if ($sTmp.Length -gt 1 -and $sTmp -cmatch "^[A-Z]*$") {$t.LastName = $TextInfo.ToTitleCase($sTmp.ToLower())}
-}
-#>
