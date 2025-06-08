@@ -1,4 +1,4 @@
-#-- Graps app-pemissions: Files.Read.All, Sites.Read.All, for rw/: Sites.ReadWrite.All, Files.ReadWrite.All
+#-- Graph app-permissions: Files.Read.All, Sites.Read.All, for rw/: Sites.ReadWrite.All, Files.ReadWrite.All
 #-- Find-MgGraphCommand -Command get-mguserdrive 
 #-- (Get-MgContext).Scopes -> to check if user/app has the right permissions
 
