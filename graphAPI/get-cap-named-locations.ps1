@@ -42,7 +42,7 @@ if ($null -eq $token)
 
 #-- Get all CAP named locations
 $method = "GET"
-$uri = "https://graph.microsoft.com/beta/identity/conditionalAccess/namedLocations"
+$uri = "https://graph.microsoft.com/v1.0/identity/conditionalAccess/namedLocations"
 $rFinal = @()
 
 #-- Get the first batch
