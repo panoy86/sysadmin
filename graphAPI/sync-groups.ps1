@@ -231,11 +231,6 @@ foreach ($hashItem in $script:tempHashGroups.GetEnumerator())
         $hashSourceAndExceptGroups.Add($hashItem.Key, 1)
     }
 }
-#-- Troubleshooting output
-#foreach ($hashItem in $hashSourceAndExceptGroups.GetEnumerator())
-#{
-#    Write-Host "   $((Get-MgGroup -GroupId $hashItem.Key).DisplayName)" -ForegroundColor Yellow
-#}
 if ($hashSourceAndExceptGroups.Contains(($script:tempListGroups | Where-Object {$_.Direction -eq "target"}).Guid))
 {
     Write-Host "Target group is in the source or except groups, please remove it from the list." -ForegroundColor Red
@@ -349,8 +344,3 @@ foreach ($member in $rSourceMembers)
 }
 Write-Host "added: $($intAddCount) to target group"
 Write-Host "runtime" ([int]((Get-Date) - $dateStart).TotalMinutes) "minutes, end."
-
-#-- Sample run, dl: sync-groups.ps1 -SourceGroups tango,tio-all -TargetGroup testecc -ExceptGroups hiring-16,welcome,wifi@
-#-- Sample run, ug: sync-groups.ps1 -SourceGroups tango,tio-all,support@tionetworks.com -TargetGroup testteam@tionetworks.onmicrosoft.com -ExceptGroups hiring-16,welcome,wifi@
-#-- Sample run, security: sync-groups.ps1 -SourceGroups tango,tio-all,support@tionetworks.com -TargetGroup test-security-group -ExceptGroups hiring-16,welcome,wifi@
-
