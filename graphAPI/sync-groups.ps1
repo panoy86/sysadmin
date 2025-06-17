@@ -278,8 +278,14 @@ Write-Host "target group type: $strTargetGroupType" -ForegroundColor Green
 $intRemoveCount = 0
 $hashSourceMembers = @{}
 $rSourceMembers | ForEach-Object {$hashSourceMembers.Add($_, 1)}
+$nCtr = 0
 foreach ($member in $rTargetMembers)
 {
+    #-- Show progress
+    $nCtr++
+    Write-Progress -Activity "Removing members from target group" -Status "Processing member $nCtr of $($rTargetMembers.Count)" -PercentComplete (($nCtr / $rTargetMembers.Count) * 100)
+
+    #-- If the member is already in the source list, skip it
     if (-not $hashSourceMembers.ContainsKey($member))
     {
         #-- Remove the member from the target group
@@ -303,6 +309,7 @@ foreach ($member in $rTargetMembers)
         }
     }
 }
+Write-Progress -Activity "Removing members from target group" -Completed -Status "Processing complete"
 Write-Host "removed: $($intRemoveCount) from target group"
 
 #-- Get an update list of target members after the removals
@@ -316,8 +323,13 @@ $rTargetMembers = $script:tempListMembers
 $intAddCount = 0
 $hashTargetMembers = @{}
 $rTargetMembers | ForEach-Object {$hashTargetMembers.Add($_, 1)}
+$nCtr = 0
 foreach ($member in $rSourceMembers)
 {
+    #-- Show progress
+    $nCtr++
+    Write-Progress -Activity "Adding members to target group" -Status "Processing member $nCtr of $($rSourceMembers.Count)" -PercentComplete (($nCtr / $rSourceMembers.Count) * 100)
+
     #-- If the member is already in the target group, skip it
     if (-not $hashTargetMembers.Contains($member))
     {
@@ -342,5 +354,6 @@ foreach ($member in $rSourceMembers)
         }
     }
 }
+Write-Progress -Activity "Adding members to target group" -Completed -Status "Processing complete"
 Write-Host "added: $($intAddCount) to target group"
 Write-Host "runtime" ([int]((Get-Date) - $dateStart).TotalMinutes) "minutes, end."
