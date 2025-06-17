@@ -1,6 +1,6 @@
 #-- This script retrieves Conditional Access Policies (CAP) and exports them to a TXT file.
 #-- Requires app-permission Policy.Read.All.
-Set-Location -Path C:\Scripts\GraphAPI\tio
+Set-Location -Path C:\Scripts\GraphAPI\
 
 #------------------------------------------------------------------------------
 #-- Authenticate to Microsoft Graph API using OAuth 2.0 client credentials flow
