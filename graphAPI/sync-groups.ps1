@@ -11,6 +11,9 @@
 #-- If target group in an Exchange object, we need to use Exchange Online Management shell to modify the membership.
 #-- Modules required: Microsoft.Graph, ExchangeOnlineManagement
 #-- Notes: with unified groups, if a member is an owner, this script cannot remove it as a member. Manually remove the owner first.
+#-- Example from Microsoft on how to create a service principal for Graph and EOL use:
+#-- https://learn.microsoft.com/en-us/entra/identity-platform/howto-create-service-principal-portal
+#-- https://learn.microsoft.com/en-us/powershell/exchange/app-only-auth-powershell-v2?view=exchange-ps
 
 param (
     [string] $SourceGroups,  #-- Comma-separated list of groups to sync from
@@ -23,6 +26,24 @@ $script:tempListGroups = @()   #-- Shared list of groups called by multiple func
 $script:tempListMembers = @()  #-- Shared list of members of a group
 $script:tempHashMembers = @{}  #-- Shared hash table of members to avoid duplicates
 $script:tempHashGroups = @{}   #-- Sahred hash table of groups to avoid endless loops
+
+#------------------------------------------------------------------------------
+#-- Authenticate to Microsoft Graph and Exchange Online
+#------------------------------------------------------------------------------
+function AuthenticateToGraphAndEOL
+{
+    #-- Disconnect from any existing sessions
+    Disconnect-MgGraph -ea SilentlyContinue
+
+    #-- Change these to your service principal details
+    $sTenantId = "your tenant id"
+    $sAppId = "your app id"
+    $sThumbprint = "your cert thumbprint"
+
+    Connect-ExchangeOnline -AppId $sAppId -CertificateThumbprint $sThumbprint -Organization "tionetworks.onmicrosoft.com"
+    Connect-MgGraph -ClientId $sAppId -TenantId $sTenantId -CertificateThumbprint $sThumbprint -NoWelcome
+    (Get-MgContext).Scopes | Sort-Object
+}
 
 #------------------------------------------------------------------------------
 #-- Search the groups and confirm they exist
@@ -141,6 +162,9 @@ if ($SourceGroups.Trim().Length -eq 0 -or $rTmpGroups.Count -eq 0 -or $TargetGro
     Write-Host ' '
     return
 }
+
+#-- Connect to Microsoft Graph and Exchange Online Management shell
+AuthenticateToGraphAndEOL
 
 #-- Prepare our list of groups, combine the sources and target into a single list
 $script:tempListGroups = @()
@@ -357,3 +381,4 @@ foreach ($member in $rSourceMembers)
 Write-Progress -Activity "Adding members to target group" -Completed -Status "Processing complete"
 Write-Host "added: $($intAddCount) to target group"
 Write-Host "runtime" ([int]((Get-Date) - $dateStart).TotalMinutes) "minutes, end."
+Disconnect-MgGraph -ea SilentlyContinue
