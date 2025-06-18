@@ -40,7 +40,7 @@ function AuthenticateToGraphAndEOL
     $sAppId = "your app id"
     $sThumbprint = "your cert thumbprint"
 
-    Connect-ExchangeOnline -AppId $sAppId -CertificateThumbprint $sThumbprint -Organization "somedomain.onmicrosoft.com"
+    Connect-ExchangeOnline -AppId $sAppId -CertificateThumbprint $sThumbprint -Organization "somedomain.onmicrosoft.com" -ShowBanner:$false -ErrorAction Stop
     Connect-MgGraph -ClientId $sAppId -TenantId $sTenantId -CertificateThumbprint $sThumbprint -NoWelcome
     (Get-MgContext).Scopes | Sort-Object
 }
