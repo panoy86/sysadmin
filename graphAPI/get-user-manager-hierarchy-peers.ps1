@@ -9,6 +9,7 @@
     .\get-user-manager-hierarchy-peers.ps1 -UserId "jdoe"
     This command retrieves the manager hierarchy and peers for the user with the alias "jdoe".
 .NOTES
+    This requires that an existing/authenticated Microsoft Graph PowerShell session.
     URI used when UserId is an alias:
     https://graph.microsoft.com/v1.0/users?$filter=mailNickname eq 'franaurtan'&$select=userPrincipalName
 
@@ -21,105 +22,114 @@ param (
 )
 
 #-- Internal variables
-$script:oToken = $null
-$script:aManagerHierarchy = @()
-$script:aPeers = @()
+$Script:Token = $null
+$Script:ManagerHierarchy = @()
+$Script:Peers = @()
 
+#------------------------------------------------------------------------------
 #-- Get the existing session token
+#------------------------------------------------------------------------------
 function Get-SessionToken
 {
-    $oRequest = @{
+    $request = @{
       Method = "GET"
       URI = "/v1.0/users"
       OutputType = "HttpResponseMessage"
     }
-    $oResponse = Invoke-GraphRequest @oRequest
-    $oHeaders = $oResponse.RequestMessage.Headers
-    $script:oToken = $oHeaders.Authorization.Parameter
+    $response = Invoke-GraphRequest @request
+    $headers = $response.RequestMessage.Headers
+    $Script:Token = $headers.Authorization.Parameter
 }
 
+#------------------------------------------------------------------------------
 #-- Get user manager hierarchy
+#------------------------------------------------------------------------------
 function Get-UserManagerHierarchy
 {
     param (
-        [string]$sUpn
+        [string]$Upn
     )
-    $sUri = "https://graph.microsoft.com/v1.0/users/" + $sUpn + "/manager"
-    $oResult = Invoke-WebRequest -Method GET -Uri $sUri -ContentType "application/json" -Headers @{Authorization = "Bearer $script:oToken"} -ErrorAction Stop
-    if ($oResult.StatusCode -eq 200)
+    $uri = "https://graph.microsoft.com/v1.0/users/" + $Upn + "/manager"
+    $result = Invoke-WebRequest -Method GET -Uri $uri -ContentType "application/json" -Headers @{Authorization = "Bearer $Script:Token"} -ErrorAction Stop -UseBasicParsing
+    if ($result.StatusCode -eq 200)
     {
-        $oContent = ConvertFrom-Json $oResult.Content
-        $oNew = [PSCustomObject]@{
-            Id = $oContent.id
-            DisplayName = $oContent.displayName
-            UserPrincipalName = $oContent.userPrincipalName
-            Title = $oContent.jobTitle
+        $content = ConvertFrom-Json $result.Content
+        $newManager = [PSCustomObject]@{
+            Id = $content.id
+            DisplayName = $content.displayName
+            UserPrincipalName = $content.userPrincipalName
+            Title = $content.jobTitle
         }    
         # Recursively get the manager's manager, reached the top when UPN is the same as the current user
-        if ($oContent.userPrincipalName -ne $sUpn)
+        if ($content.userPrincipalName -ne $Upn)
         {
-            $script:aManagerHierarchy += $oNew
-            Get-UserManagerHierarchy -sUpn $oContent.userPrincipalName
+            $Script:ManagerHierarchy += $newManager
+            Get-UserManagerHierarchy -Upn $content.userPrincipalName
         }
     }
 }
 
+#------------------------------------------------------------------------------
 #-- Get the peers for this user
+#------------------------------------------------------------------------------
 function Get-UserPeers
 {
     param (
-        [string]$sManagerUpn
+        [string]$ManagerUpn
     )
-    $sUri = "https://graph.microsoft.com/v1.0/users/" + $sManagerUpn + "/directReports"
-    $oResult = Invoke-WebRequest -Method GET -Uri $sUri -ContentType "application/json" -Headers @{Authorization = "Bearer $script:oToken"} -ErrorAction Stop
-    if ($oResult.StatusCode -eq 200)
+    $uri = "https://graph.microsoft.com/v1.0/users/" + $ManagerUpn + "/directReports"
+    $result = Invoke-WebRequest -Method GET -Uri $uri -ContentType "application/json" -Headers @{Authorization = "Bearer $Script:Token"} -ErrorAction Stop
+    if ($result.StatusCode -eq 200)
     {
-        $oContent = ConvertFrom-Json $oResult.Content
-        foreach ($oUser in $oContent.value)
+        $content = ConvertFrom-Json $result.Content
+        foreach ($user in $content.value)
         {
-            $oNew = [PSCustomObject]@{
-                Id = $oUser.id
-                DisplayName = $oUser.displayName
-                UserPrincipalName = $oUser.userPrincipalName
-                Title = $oUser.jobTitle
+            $newPeer = [PSCustomObject]@{
+                Id = $user.id
+                DisplayName = $user.displayName
+                UserPrincipalName = $user.userPrincipalName
+                Title = $user.jobTitle
             }    
-            $script:aPeers += $oNew
+            $Script:Peers += $newPeer
         }
     }
 }
 
+#------------------------------------------------------------------------------
 #-- Get the licenses applied to the peers
+#------------------------------------------------------------------------------
 function Get-LicensesPerUser
 {
-    foreach ($oPeer in $script:aPeers)
+    foreach ($peer in $Script:Peers)
     {
-        $sUpn = $oPeer.UserPrincipalName
-        $sUri = "https://graph.microsoft.com/v1.0/users/" + $sUpn + "/licenseDetails"
-        $oResult = Invoke-WebRequest -Method GET -Uri $sUri -ContentType "application/json" -Headers @{Authorization = "Bearer $script:oToken"} -ErrorAction Stop
-        if ($oResult.StatusCode -eq 200)
+        $upn = $peer.UserPrincipalName
+        $uri = "https://graph.microsoft.com/v1.0/users/" + $upn + "/licenseDetails"
+        $result = Invoke-WebRequest -Method GET -Uri $uri -ContentType "application/json" -Headers @{Authorization = "Bearer $Script:Token"} -ErrorAction Stop
+        if ($result.StatusCode -eq 200)
         {
-            $oContent = ConvertFrom-Json $oResult.Content
-            $aLicenses = @()
-            foreach ($oLicense in $oContent.value)
+            $content = ConvertFrom-Json $result.Content
+            $skuLicenses = @()
+            foreach ($license in $content.value)
             {
-                #$oLicense | Format-List
-                $aLicenses += $oLicense.skuPartNumber
+                $skuLicenses += $license.skuPartNumber
             }
-            $oPeer | Add-Member -MemberType NoteProperty -Name Licenses -Value ($aLicenses -join ", ")
-            $oPeer | Add-Member -MemberType NoteProperty -Name BasicLicense -Value ''
-            if ($aLicenses -contains "ENTERPRISEPACK")
+            $peer | Add-Member -MemberType NoteProperty -Name Licenses -Value ($skuLicenses -join ", ")
+            $peer | Add-Member -MemberType NoteProperty -Name BasicLicense -Value ''
+            if ($skuLicenses -contains "ENTERPRISEPACK")
             {
-                $oPeer.BasicLicense = "E3"
+                $peer.BasicLicense = "E3"
             }
-            elseif (($aLicenses -contains "STANDARDPACK") -or ($aLicenses -contains "EXCHANGEENTERPRISE"))
+            elseif (($skuLicenses -contains "STANDARDPACK") -or ($skuLicenses -contains "EXCHANGEENTERPRISE"))
             {
-                $oPeer.BasicLicense = "F3"
+                $peer.BasicLicense = "F3"
             }
         }
     }
 }
 
+#------------------------------------------------------------------------------
 #-- Validate the UserId input
+#------------------------------------------------------------------------------
 function Test-UserId
 {
     param (
@@ -131,65 +141,64 @@ function Test-UserId
         exit
     }
     # Check if the input is an UPN or alias and construct the appropriate Graph API query
-    $bIsUpn = $null
+    $isUpn = $null
     if ($UserId -like "*@*")
     {
-        #$sUri = "https://graph.microsoft.com/v1.0/users/" + $UserId + "&`$select=userPrincipalName"
-        $sUri = "https://graph.microsoft.com/v1.0/users('" + $UserId + "')"
-        $bIsUpn = $true
+        $uri = "https://graph.microsoft.com/v1.0/users('" + $UserId + "')"
+        $isUpn = $true
     }
     else
     {
-        $sUri = "https://graph.microsoft.com/v1.0/users?`$filter=mailNickname eq '$UserId'&`$select=userPrincipalName"
-        $bIsUpn = $false
+        $uri = "https://graph.microsoft.com/v1.0/users?`$filter=mailNickname eq '$UserId'&`$select=userPrincipalName"
+        $isUpn = $false
     }
-    Write-Host $sUri -ForegroundColor Yellow
+    Write-Host $uri -ForegroundColor Yellow
     # Query Graph API to get the UPN, if the input is an alias, or validate the UPN exists
-    $bUserFound = $false
-    $oResult = $null
-    #$ProgressPreference = 'SilentlyContinue'
-    $oResult = Invoke-WebRequest -Method GET -Uri $sUri -ContentType "application/json" -Headers @{Authorization = "Bearer $script:oToken"} -ErrorAction SilentlyContinue
-    #$oResult = Invoke-WebRequest -Method GET -Uri $sUri -ContentType "application/json" -Headers @{Authorization = "Bearer $script:oToken"} -ProgressAction SilentlyContinue
-    if ($null -eq $oResult)
+    $isUserFound = $false
+    $result = $null
+    $result = Invoke-WebRequest -Method GET -Uri $uri -ContentType "application/json" -Headers @{Authorization = "Bearer $Script:Token"} -ErrorAction SilentlyContinue
+        if ($null -eq $result)
     {
         #Write-Error "Failed to query Graph API for user information."
         exit
     }
-    $oContent = ConvertFrom-Json $oResult.Content
-    if ($oResult.StatusCode -eq 200)
+    $content = ConvertFrom-Json $result.Content
+    if ($result.StatusCode -eq 200)
     {
-        $oContent = ConvertFrom-Json $oResult.Content
-        if ($bIsUpn)
+        $content = ConvertFrom-Json $result.Content
+        if ($isUpn)
         {
-            $sUpn = $oContent.userPrincipalName
-            $bUserFound = $true
+            $returnUpn = $content.userPrincipalName
+            $isUserFound = $true
         }
         else
         {
-            if ($oContent.value.Count -eq 1)
+            if ($content.value.Count -eq 1)
             {
-                $sUpn = $oContent.Value[0].userPrincipalName
-                $bUserFound = $true
+                $returnUpn = $content.Value[0].userPrincipalName
+                $isUserFound = $true
             }
         }
     }
-    if (-not $bUserFound)
+    if (-not $isUserFound)
     {
         Write-Error "Alias '$UserId' not found or is not unique."
         exit
     }
-    return $sUpn
+    return $returnUpn
 }
 
-#-- Main code
+#------------------------------------------------------------------------------
+#-- Main script
+#------------------------------------------------------------------------------
 Get-SessionToken
-$sUpn = Test-UserId -UserId $UserId
+$upn = Test-UserId -UserId $UserId
 
-Write-Host "Manager hierarchy for user:" $sUpn -ForegroundColor Cyan
-Get-UserManagerHierarchy -sUpn $sUpn
-$script:aManagerHierarchy | Select-Object DisplayName,UserPrincipalName,Title | Format-Table
+Write-Host "Manager hierarchy for user:" $upn -ForegroundColor Cyan
+Get-UserManagerHierarchy -Upn $upn
+$Script:ManagerHierarchy | Select-Object DisplayName,UserPrincipalName,Title | Format-Table
 
-Write-Host "Peer information for user:" $sUpn -ForegroundColor Cyan
-Get-UserPeers -sManagerUpn $script:aManagerHierarchy[0].UserPrincipalName
+Write-Host "Peer information for user:" $upn -ForegroundColor Cyan
+Get-UserPeers -ManagerUpn $Script:ManagerHierarchy[0].UserPrincipalName
 Get-LicensesPerUser
-$script:aPeers | Select-Object DisplayName,UserPrincipalName,Title,BasicLicense | Format-Table
+$Script:Peers | Sort-Object DisplayName | Select-Object DisplayName,UserPrincipalName,Title,BasicLicense | Format-Table
