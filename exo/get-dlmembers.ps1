@@ -135,7 +135,11 @@ function Get-DLMembersRecursive
 #------------------------------------------------------------------------------
 #-- Main
 #------------------------------------------------------------------------------
-$PSStyle.Progress.View = "Minimal"  #-- Other value: "Classic", only works in PowerShell 7.2+
+if ([int]$PSVersionTable.PSVersion.Major -ge 7)
+{
+    Import-Module PSReadLine -Force     # Fixes progress bar issues in PowerShell 7+
+    $PSStyle.Progress.View = "Minimal"  # Other value: "Minimal", only works in PowerShell 7.2+
+}
 $ProgressPreference = "Continue"
 
 Write-Host "This script will search for members of the specified Distribution Lists (DLs) and their sub-DLs."
