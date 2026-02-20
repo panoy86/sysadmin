@@ -17,18 +17,21 @@
 #>
 
 param (
-    [string] $DistributionLists,  #-- Comma-separated list of Distribution Lists to search
-    [string] $Keyword             #-- Keyword to search in DL names (not used in this script)
+    [string] $DistributionLists,  # Comma-separated list of Distribution Lists to search
+    [string] $Keyword             # Keyword to search in DL names (not used in this script)
 )
 
-$Script:MoreDetails = $true
+$Script:MoreDetails = $true    # Set to $true to show the full accept/reject list of each DL; set to $false to only show the matching entries in the accept/reject list of each DL
 
 # Main program, do not change
-$Script:HashMembers = @{}
+$Script:HashMembers = @{}      # This is used to keep track of all the unique members we found in our search, key is the member's guid
 $Script:HashGroupsFound = @{}  # This is used to detect loops; group1 is a member of group2, which is a member of group1
-$Script:DlsToFixAccept = @()
-$Script:DlsToFixReject = @()
+$Script:DlsToFixAccept = @()   # This is used to keep track of DLs that we need to add the sender to the accept list
+$Script:DlsToFixReject = @()   # This is used to keep track of DLs that we need to remove the sender from the reject list
 
+#------------------------------------------------------------------------------
+#-- Recursively search DLs for members and restrictions
+#------------------------------------------------------------------------------
 function RecursivelyCheckDL
 {
     param (
@@ -174,6 +177,7 @@ function RecursivelyCheckDL
 #------------------------------------------------------------------------------
 #-- Main program
 #------------------------------------------------------------------------------
+$startTime = Get-Date
 if ([int]$PSVersionTable.PSVersion.Major -ge 7)
 {
     Import-Module PSReadLine -Force     # Fixes progress bar issues in PowerShell 7+
@@ -198,16 +202,18 @@ if ($DistributionLists.Trim().Length -eq 0 -or $listOfDLs.Count -eq 0 -or $Scrip
     return
 }
 
-# Loop thru list of DLs
+# Loop thru list of DLs, and show total members/groups found in all DLs
+$Script:HashMembers = @{}
+$Script:HashGroupsFound = @{}
 foreach ($itemDL in $listOfDLs)
 {
-    $Script:HashMembers = @{}
-    $Script:HashGroupsFound = @{}
     RecursivelyCheckDL -DLName $itemDL
-    Write-Host "Total users:" $Script:HashMembers.Count
-    Write-Host "Total groups:" $Script:HashGroupsFound.Count
-    Write-Host ' '
 }
+Write-Host "Total users:" $Script:HashMembers.Count
+Write-Host "Total groups:" $Script:HashGroupsFound.Count
+Write-Host ' '
+
+
 # Show final results
 if ($Script:DlsToFixAccept.Count -gt 0)
 {
@@ -219,3 +225,4 @@ if ($Script:DlsToFixReject.Count -gt 0)
     Write-Host "DLs to remove user from reject list:"
     foreach ($dl in $Script:DlsToFixReject) {Write-Host "  " - $dl.DisplayName -NoNewline; Write-Host (" (" + $dl.PrimarySmtpAddress.ToString() + ")") -ForegroundColor Red}
 }
+Write-Host "Run time: " -NoNewline; Write-Host ((Get-Date) - $startTime).ToString() -ForegroundColor Yellow
