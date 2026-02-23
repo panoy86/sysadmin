@@ -1,0 +1,24 @@
+Install-Module Microsoft.Graph -Scope AllUsers
+Copy
+Connect to Microsoft Graph Authenticate with the required permissions:
+
+$TenantId = "your-tenant-id"
+Connect-MgGraph -TenantId $TenantId -Scopes "AppRoleAssignment.ReadWrite.All", "Application.Read.All"
+Copy
+Retrieve Managed Identity and Microsoft Graph Service Principal Replace ManagedIdentityName with your Managed Identity's name:
+
+$MSIName = "ManagedIdentityName"
+$GraphAppId = "00000003-0000-0000-c000-000000000000" # Microsoft Graph App ID
+
+$MSI = Get-MgServicePrincipal -Filter "DisplayName eq '$MSIName'"
+$GraphSP = Get-MgServicePrincipal -Filter "AppId eq '$GraphAppId'"
+Copy
+Assign Permissions Specify the required permissions (e.g., Directory.Read.All) and assign them:
+
+$Permissions = @("Directory.Read.All", "User.Read.All")
+$AppRoles = $GraphSP.AppRoles | Where-Object { $_.Value -in $Permissions }
+
+foreach ($AppRole in $AppRoles) {
+New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $MSI.Id `
+-ResourceId $GraphSP.Id -AppRoleId $AppRole.Id
+}
