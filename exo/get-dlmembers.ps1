@@ -20,73 +20,61 @@ param (
 )
 
 #-- Main program, do not change
-$script:hTotalMembers = @{}
-$script:nTotalDLCount = 0
-$script:hGroupsFound = @{}  #-- This is used to detect loops
-$script:aSubDLs = @()
-$script:sMemberMatch = $null
+$script:HashMembersEmail = @{} # Unique list of members with email as key and the member object as value
+$script:TotalDLCount = 0
+$script:HashGroupsFound = @{}  # This is used to detect loops
+#$script:aSubDLs = @()
+$script:MemberKeywordMatch = $null
 
 #---------------------------------------------------------------------------------
 #-- Recursive function for DL search
 #---------------------------------------------------------------------------------
 function Get-DLMembersRecursive
 {
-    param([String] $sDL)
+    param ([String] $DLIdentity)
     
-    #-- Find the DL
-    $oDL = $null
-    $oDL = Get-DistributionGroup -Identity $sDL -ea SilentlyContinue
-    if ($null -ne $oDL)
-    {
-        #-- Check for loop
-        if ($script:hGroupsFound.ContainsKey($oDL.Guid.ToString()))
-        {
-            Write-Host ($oDL.Name.ToString() + " (loop found)") -ForegroundColor Yellow
+    # Find the DL
+    $dl = $null
+    $dl = Get-DistributionGroup -Identity $DLIdentity -ea SilentlyContinue
+    if ($null -ne $dl) {
+        # Check for loop
+        if ($script:HashGroupsFound.ContainsKey($dl.Guid.ToString())) {
+            Write-Host ($dl.Name.ToString() + " (loop found)") -ForegroundColor Yellow
         }
-        else
-        {
-            #-- Get the members
-            $script:hGroupsFound.Add($oDL.Guid.ToString(), 1)
-            [array]$aMembers = Get-DistributionGroupMember $oDL.Guid.ToString() -ResultSize unlimited
+        else {
+            # Get the members
+            $script:HashGroupsFound.Add($dl.Guid.ToString(), 1)
+            [array]$dlMembers = Get-DistributionGroupMember $dl.Guid.ToString() -ResultSize unlimited
             
-            #-- Show progress
-            Write-Host ("-> " + $oDL.Name + " " + $aMembers.Count.ToString())
+            # Show progress
+            Write-Host ("-> " + $dl.Name + " " + $dlMembers.Count.ToString())
 
-            #-- Loop thru members
-            if ($aMembers.Count -gt 0)
-            {
-                #-- Track the sub-DLs
-                $script:aSubDLs += ($aMembers.Count.ToString() + ", " + $oDL.Name)
-                Write-Progress -Activity "Finding member DLs" -Status ($aMembers.Count.ToString() + ", " + $oDL.Name)
-                foreach($oMember in $aMembers)
-                {
-                    #-- Recursively call if member is another group
-                    if ($oMember.RecipientType -like "*Group")
-                    {
-                        $script:nTotalDLCount++
-                        Get-DLMembersRecursive($oMember.PrimarySmtpAddress.ToString())
+            # Loop thru members
+            if ($dlMembers.Count -gt 0) {
+                # Track the sub-DLs
+                #$script:aSubDLs += ($dlMembers.Count.ToString() + ", " + $dl.Name)
+                Write-Progress -Activity "Finding member DLs" -Status ($dlMembers.Count.ToString() + ", " + $dl.Name)
+                foreach($member in $dlMembers) {
+                    # Recursively call if member is another group
+                    if ($member.RecipientType -like "*Group") {
+                        $script:TotalDLCount++
+                        Get-DLMembersRecursive -DLIdentity $member.PrimarySmtpAddress.ToString()
                     }
                     #-- Add user-mailbox/mail-contact to list
-                    else
-                    {
-                        $sEmail = $oMember.PrimarySmtpAddress.ToString().ToLower().Trim()
-                        if (-not $script:hMembers.ContainsKey($sEmail)) {$script:hMembers.Add($sEmail, $oDL.Name)}
-                        else
-                        {
-                            #Write-Host "   duplicate: " -ForegroundColor Yellow -NoNewline
-                            #Write-Host $sEmail $script:hMembers[$sEmail]
+                    else {
+                        $email = $member.PrimarySmtpAddress.ToString().ToLower().Trim()
+                        if (-not $script:HashMembersEmail.ContainsKey($email)) {
+                            $script:HashMembersEmail.Add($email, $dl.Name)
                         }
-                        if (-not $script:hTotalMembers.ContainsKey($sEmail))
-                        {$script:hTotalMembers.Add($sEmail, $oMember)}
+                        if (-not $script:HashMembersEmail.ContainsKey($email)) {
+                            $script:HashMembersEmail.Add($email, $member)
+                        }
 
 						#-- Check for the member keyword match
-						if ($null -ne $script:sMemberMatch)
-						{
-							#if ($script:sMemberMatch -match $sEmail)
-							if ($sEmail -match $script:sMemberMatch)
-							{
+						if ($null -ne $script:MemberKeywordMatch) {
+							if ($email -match $script:MemberKeywordMatch) {
 								Write-Host "   match found: " -ForegroundColor Green -NoNewline
-                            	Write-Host $sEmail "->" $sDL #"->" $script:sMemberMatch
+                            	Write-Host $email "->" $DLIdentity
 							}
 						}
                     }
@@ -94,40 +82,33 @@ function Get-DLMembersRecursive
             }
         }
     }
-    #-- If the DL is not found, check if it's a Dynamic Distribution List (DDL)
-    else
-    {
-        $oDDL = $null
-        $oDDL = Get-DynamicDistributionGroup -Identity $sDL -ea SilentlyContinue
-        if ($null -ne $oDDL)
-        {
-            #-- Show progress
-            $aMembers = Get-Recipient -RecipientPreviewFilter $oDDL.RecipientFilter -ResultSize unlimited
-            Write-Host ("-> " + $oDDL.Name + " (dynamic) " + $aMembers.Count.ToString())
-            foreach($oMember in $aMembers)
-            {
-                $sEmail = $oMember.PrimarySmtpAddress.ToString().ToLower().Trim()
-                if (-not $script:hMembers.ContainsKey($sEmail)) {$script:hMembers.Add($sEmail, $oDDL.Name)}
-                else
-                {
-                    #Write-Host "   duplicate: " -ForegroundColor Yellow -NoNewline
-                    #Write-Host $sEmail $script:hMembers[$sEmail]
+    # If the DL is not found, check if it's a Dynamic Distribution List (DDL)
+    else {
+        $ddl = $null
+        $ddl = Get-DynamicDistributionGroup -Identity $DLIdentity -ea SilentlyContinue
+        if ($null -ne $ddl) {
+            # Show progress
+            $dlMembers = Get-Recipient -RecipientPreviewFilter $ddl.RecipientFilter -ResultSize unlimited
+            Write-Host ("-> " + $ddl.Name + " (dynamic) " + $dlMembers.Count.ToString())
+            foreach($member in $dlMembers) {
+                $email = $member.PrimarySmtpAddress.ToString().ToLower().Trim()
+                if (-not $script:HashMembersEmail.ContainsKey($email)) {
+                    $script:HashMembersEmail.Add($email, $ddl.Name)
                 }
-                if (-not $script:hTotalMembers.ContainsKey($sEmail))
-                {$script:hTotalMembers.Add($sEmail, $oMember)}
+                if (-not $script:HashMembersEmail.ContainsKey($email)) {
+                    $script:HashMembersEmail.Add($email, $member)
+                }
             
-                #-- Check for the member keyword match
-                if ($null -ne $script:sMemberMatch)
-                {
-                    if ($sEmail -match $script:sMemberMatch)
-                    {
+                # Check for the member keyword match
+                if ($null -ne $script:MemberKeywordMatch) {
+                    if ($email -match $script:MemberKeywordMatch) {
                         Write-Host "   match found: " -ForegroundColor Green -NoNewline
-                        Write-Host $sEmail "->" $sDL #"->" $script:sMemberMatch
+                        Write-Host $email "->" $DLIdentity #"->" $script:MemberKeywordMatch
                     }
                 }
             }
         }
-        else {Write-Host ($sDL + " not found") -ForegroundColor Red}
+        else {Write-Host ($DLIdentity + " not found") -ForegroundColor Red}
     }
     Write-Progress -Activity "Finding member DLs" -Completed
 }
@@ -135,54 +116,49 @@ function Get-DLMembersRecursive
 #------------------------------------------------------------------------------
 #-- Main
 #------------------------------------------------------------------------------
-if ([int]$PSVersionTable.PSVersion.Major -ge 7)
-{
+if ([int]$PSVersionTable.PSVersion.Major -ge 7) {
     Import-Module PSReadLine -Force     # Fixes progress bar issues in PowerShell 7+
     $PSStyle.Progress.View = "Minimal"  # Other value: "Minimal", only works in PowerShell 7.2+
 }
 $ProgressPreference = "Continue"
 
 Write-Host "This script will search for members of the specified Distribution Lists (DLs) and their sub-DLs."
-#-- Get input of DLs from the user
-if ($null -ne $ListOfDLs)
-{
-    #Write-Host $ListOfDLs
-    $aDLs = $ListOfDLs.Split(" ")
+if ($null -ne $ListOfDLs) {
+    $listDls = $ListOfDLs.Split(" ")
 }
-else
-{
+else {
+    # Get input of DLs from the user
     Write-Host "Enter the name of the Distribution Lists (DLs) to search, separated by commas:"
-    $sInput = Read-Host
-    $aDLs = $sInput.Split(",")
+    $inputHost = Read-Host
+    $listDls = $inputHost.Split(",")
 }
 
-#-- Get the optional member/keyword to search. If supplied, this will look for members that match this keyword
-#-- and display the DL that this user is a member of. Handy for figuring out where a particular user is a
-#-- member of when it involves hundreds of DLs to search.
-if ($Keyword -ne $null -and $Keyword.Trim().Length -gt 0)
-{
-	$script:sMemberMatch = $Keyword
+# Get the optional member/keyword to search. If supplied, this will look for members that match this keyword
+# and display the DL that this user is a member of. Handy for figuring out where a particular user is a
+# member of when it involves hundreds of DLs to search.
+if ($Keyword -ne $null -and $Keyword.Trim().Length -gt 0) {
+	$script:MemberKeywordMatch = $Keyword
 	Write-Host "Member keyword match: " -NoNewline
-	Write-Host $script:sMemberMatch -ForegroundColor Green
+	Write-Host $script:MemberKeywordMatch -ForegroundColor Green
 }
-else {$script:sMemberMatch = $null}
+else {
+    $script:MemberKeywordMatch = $null
+}
 
-#-- Loop thru the DLs
-foreach ($sDL in $aDLs)
-{
+# Loop thru the DLs
+foreach ($DLIdentity in $listDls) {
     $script:hMembers = @{}
-    Get-DLMembersRecursive($sDL.Trim())
-    Write-Host ($sDL  + " (" + $script:hMembers.Count + ")")
+    Get-DLMembersRecursive -DLIdentity $DLIdentity.Trim()
+    Write-Host ($DLIdentity  + " (" + $script:hMembers.Count + ")")
 }
-Write-Host "Total users:" $script:hTotalMembers.Count
-Write-Host "Total DLs (duplicates allowed):" $script:nTotalDLCount
+Write-Host "Total users:" $script:HashMembersEmail.Count
+Write-Host "Total DLs (duplicates allowed):" $script:TotalDLCount
 
-#-- Optional, get the SMTP list only
+# Optional, get the SMTP list only
 $rFinal = @()
-$rTmp = $script:hTotalMembers.Get_Keys()
-foreach($t in $rTmp)
-{
-    if ($script:hTotalMembers.ContainsKey($t)) {$rFinal += $script:hTotalMembers[$t]}
+$rTmp = $script:HashMembersEmail.Get_Keys()
+foreach($t in $rTmp) {
+    if ($script:HashMembersEmail.ContainsKey($t)) {$rFinal += $script:HashMembersEmail[$t]}
 }
 $rTmp = @()
 $rFinal | ForEach-Object {$rTmp += $_.PrimarySmtpAddress}
