@@ -7,18 +7,18 @@
     the found DLs and show if the sender is in the accept or reject list of the DL.
 .PARAMETER DistributionLists
     Comma-separated list of Distribution Lists to search.
-.PARAMETER Keyword
-    Keyword to search in DL names (not used in this script).
+.PARAMETER Keywords
+    Comma-separated list of keywords to search in DLs' accept/reject lists.
 .EXAMPLE
-    .\get-nested-dls-with-restrictions.ps1 -DistributionLists "dl1,dl2" -Keyword "user1"
-    This will search for members of dl1 and dl2, and all their sub-DLs, and check if "user1" is in the accept or reject list of any of the found DLs.
+    .\get-nested-dls-with-restrictions.ps1 -DistributionLists "dl1,dl2" -Keywords "user1,user2"
+    This will search for members of dl1 and dl2, and all their sub-DLs, and check if "user1" or "user2" is in the accept or reject list of any of the found DLs.
 .NOTES
     Assumes that an existing PowerShell session to Exchange/Online is already set.
 #>
 
 param (
     [string] $DistributionLists,  # Comma-separated list of Distribution Lists to search
-    [string] $Keyword             # Keyword to search in DL names (not used in this script)
+    [string] $Keywords           # Comma-separated list of keywords to search in DLs' accept/reject lists
 )
 
 $Script:MoreDetails = $true    # Set to $true to show the full accept/reject list of each DL; set to $false to only show the matching entries in the accept/reject list of each DL
@@ -95,23 +95,33 @@ function RecursivelyCheckDL
             }
             $acceptList | ForEach-Object {$_ | Add-Member -MemberType NoteProperty -Name 'Found' -Value $false -Force}
 
-            # Loop and see if it matches our sender/keyword
-            $isFound = $false
+            # Prepare the list of keywords to match
+            $ListKeywords = @()
+            foreach ($keyword in $Script:Keywords.Split(',')) {
+                $ListKeywords += New-Object PSObject -Property @{Keyword = $keyword.Trim().ToLower(); Found = $false}
+            }
+
+            # Loop and see if it matches our sender/keywords
             foreach ($acceptEntry in $acceptList) {
-                if ($acceptEntry.PrimarySmtpAddress.ToString() -match $Script:KeywordToMatch) {
-                    $acceptEntry.Found = $true
+                foreach ($keyword in $ListKeywords) {
+                    $stringMatch = $keyword.Keyword
+                    if ($acceptEntry.PrimarySmtpAddress.ToString() -match $stringMatch) {
+                        $acceptEntry.Found = $true
+                        $keyword.Found = $true
+                    }
                 }
-                if ($acceptEntry.DisplayName -match $Script:KeywordToMatch) {
-                    $acceptEntry.Found = $true
-                }
-                if ($acceptEntry.Found) {
-                    $isFound = $true
+                foreach ($keyword in $ListKeywords) {
+                    $stringMatch = $keyword.Keyword
+                    if ($acceptEntry.DisplayName -match $stringMatch) {
+                        $acceptEntry.Found = $true
+                        $keyword.Found = $true
+                    }
                 }
             }
             
             # Show our results
             $counter = 0
-            foreach ($acceptEntry in $acceptList) {
+            foreach ($acceptEntry in ($acceptList | Sort-Object PrimarySmtpAddress)) {
                 if ($counter -eq 0) {
                     Write-Host "   Accept --> " -NoNewline} else {Write-Host "              " -NoNewline
                 }
@@ -123,9 +133,11 @@ function RecursivelyCheckDL
                     Write-Host $acceptEntry.PrimarySmtpAddress.ToString()
                 }
             }
-            if (-not $isFound) {
-                Write-Host "   Accept --> $($Script:KeywordToMatch) not found"  -ForegroundColor Red
-                $Script:DlsToFixAccept += $dl
+            foreach ($keyword in $ListKeywords) {
+                if (-not $keyword.Found) {
+                    Write-Host "   Accept --> $($keyword.Keyword) not found"  -ForegroundColor Red
+                    $Script:DlsToFixAccept += $dl
+                }
             }
         }
         else {
@@ -146,14 +158,20 @@ function RecursivelyCheckDL
             }
             $rejectList | ForEach-Object {$_ | Add-Member -MemberType NoteProperty -Name 'Found' -Value $false -Force}
 
-            # Loop and see if it matches our sender
+            # Loop and see if it matches our sender/keywords
             $isFound = $false
             foreach ($rejectEntry in $rejectList) {
-                if ($rejectEntry.PrimarySmtpAddress.ToString() -match $Script:KeywordToMatch) {
-                    $rejectEntry.Found = $true
+                foreach ($keyword in $Script:Keywords.Split(',')) {
+                    $keyword = $keyword.Trim().ToLower()
+                    if ($rejectEntry.PrimarySmtpAddress.ToString() -match $keyword) {
+                        $rejectEntry.Found = $true
+                    }
                 }
-                if ($rejectEntry.DisplayName -match $Script:KeywordToMatch) {
-                    $rejectEntry.Found = $true
+                foreach ($keyword in $Script:Keywords.Split(',')) {
+                    $keyword = $keyword.Trim().ToLower()
+                    if ($rejectEntry.DisplayName -match $keyword) {
+                        $rejectEntry.Found = $true
+                    }
                 }
                 if ($rejectEntry.Found) {
                     $isFound = $true
@@ -210,15 +228,14 @@ $ProgressPreference = "Continue"
 # Normalize the parameters
 $listOfDLs = @()
 $DistributionLists -split ' ' | ForEach-Object {$listOfDLs += $_.Trim()}
-$Script:KeywordToMatch = $Keyword.Trim().ToLower()
 
 # If the parameters are empty, show command line usage and exit
-if ($DistributionLists.Trim().Length -eq 0 -or $listOfDLs.Count -eq 0 -or $Script:KeywordToMatch.Length -eq 0) {
+if ($DistributionLists.Trim().Length -eq 0 -or $listOfDLs.Count -eq 0 -or $Script:Keywords.Length -eq 0) {
     Write-Host "Usage: " -NoNewline
     Write-Host ".\get-nested-dls-with-restrictions.ps1 -DistributionLists " -NoNewline -ForegroundColor Yellow
     Write-Host "dl1,dl2 " -NoNewline
-    Write-Host "-Keyword " -NoNewline -ForegroundColor Yellow
-    Write-Host "somekeyword"
+    Write-Host "-Keywords " -NoNewline -ForegroundColor Yellow
+    Write-Host "sender1,sender2,sender3" -ForegroundColor Yellow
     Write-Host ' '
     return
 }
