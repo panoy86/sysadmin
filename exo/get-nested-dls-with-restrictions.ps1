@@ -2,35 +2,83 @@
 .SYNOPSIS
     Get nested Distribution Lists with restrictions
 .DESCRIPTION
-    This script will search for members of the specified Distribution Lists (DLs) and their sub-DLs.
-    and use the keyword (full or partial match of sender's email or display-name) to look for all
-    the found DLs and show if the sender is in the accept or reject list of the DL.
+    This script will search for members of the specified Distribution Lists (DLs) and their sub-DLs,
+        and use the sender-keywords (full or partial match of sender's email or display-name) to look for all
+        the found DLs and show if the sender(s) is in the accept or reject list of the DL.
 .PARAMETER DistributionLists
     Comma-separated list of Distribution Lists to search.
 .PARAMETER Keywords
-    Comma-separated list of keywords to search in DLs' accept/reject lists.
+    Comma-separated list of sender-keywords to search in DLs' accept/reject lists.
 .EXAMPLE
     .\get-nested-dls-with-restrictions.ps1 -DistributionLists "dl1,dl2" -Keywords "user1,user2"
-    This will search for members of dl1 and dl2, and all their sub-DLs, and check if "user1" or "user2" is in the accept or reject list of any of the found DLs.
+    This will search for members of dl1 and dl2, and all their sub-DLs, and check if "user1" or "user2" is
+        in the accept or reject list of any of the found DLs.
 .NOTES
     Assumes that an existing PowerShell session to Exchange/Online is already set.
+    If Azure automation/runbook is detected, it will assume a managed identity is set and attempt to
+        authenticate to Exchange Online.
+    Because a runbook does not have the same display capabilities as an interactive normal PowerShell session,
+        a special function is created to handle the output differently for runbook vs local sessions, so that
+        the output is still readable in a runbook.
 #>
 
 param (
-    [string] $DistributionLists,  # Comma-separated list of Distribution Lists to search
+    [string] $DistributionLists, # Comma-separated list of Distribution Lists to search
     [string] $Keywords           # Comma-separated list of keywords to search in DLs' accept/reject lists
 )
 
-$Script:MoreDetails = $true    # Set to $true to show the full accept/reject list of each DL; set to $false to only show the matching entries in the accept/reject list of each DL
+$Script:MoreDetails = $true # Set to $true to show the full accept/reject list of each DL; set to $false to only show the matching entries in the accept/reject list of each DL
 
 # Main program, do not change
 $Script:HashMembers = @{}      # This is used to keep track of all the unique members we found in our search, key is the member's guid
 $Script:HashGroupsFound = @{}  # This is used to detect loops; group1 is a member of group2, which is a member of group1
 $Script:DlsToFixAccept = @()   # This is used to keep track of DLs that we need to add the sender to the accept list
 $Script:DlsToFixReject = @()   # This is used to keep track of DLs that we need to remove the sender from the reject list
+$Script:IsRunbook = $false     # This is used to indicate if we are running in an Azure Automation runbook
 
 #------------------------------------------------------------------------------
-#-- Recursively search DLs for members and restrictions
+# Function to handle output differently for runbook vs local sessions, so that
+# the output is still readable in a runbook, requires the use of curly brackets,
+# hence curly brackets are excluded in the output.
+# It expects a single string input with color tags in curly brackets,
+# e.g. "This is a {Red}red{Green} and green{Yellow} message{Blue}"
+#------------------------------------------------------------------------------
+function Write-ToDisplay
+{
+    param(
+        [string]$Message
+    )
+    # Remove color tags for runbook sessions
+    if ($Script:IsRunbook) {   
+        $Message = $Message -replace '\{.*?\}', ''
+        Write-Output $Message
+        return
+    }
+    # Else, process color tags for local sessions
+    $listPhrases = $Message -split '}'
+    foreach ($phrase in $listPhrases) {
+        if ($phrase -match '\{') {
+            $phrase += '}'
+        }
+        # Split the phrase into text and color components
+        $text = $phrase -replace '\{.*?\}', ''
+        $colorMatch = [regex]::Match($phrase, '\{(.*?)\}')
+        if ($colorMatch.Success) {
+            $color = $colorMatch.Groups[1].Value
+            if ($color.Length -eq 0) {
+                $color = "White"
+            }
+            Write-Host $text -ForegroundColor $color -NoNewline
+        } else {
+            Write-Host $text -NoNewline
+        }
+    }
+    Write-Host "" # New line after processing all phrases
+    return
+}
+
+#------------------------------------------------------------------------------
+# Recursively search DLs for members and restrictions
 #------------------------------------------------------------------------------
 function RecursivelyCheckDL
 {
@@ -50,20 +98,22 @@ function RecursivelyCheckDL
             $isDynamicDL = $true
         }
     }
+    # Exit function if DL not found
     if ($null -eq $dl) {
-        Write-Host "DL not found: " -NoNewline
-        Write-Host $DLName -ForegroundColor Red
+        Write-ToDisplay ("DL not found: {}" + $DLName + "{Red}")
         return
     }
 
-    # Check for DL loops (e.g., group1 is a member of group2, which is a member of group1); if loop found, skip processing this DL since we already processed it when we hit it the first time
+    # Check for DL loops (e.g., group1 is a member of group2, which is a member of group1);
+    # if loop found, skip processing this DL since we already processed it when we hit it the first time
     if ($Script:HashGroupsFound.ContainsKey($dl.Guid.ToString())) {
         if ($Script:MoreDetails) {
-            Write-Host "Loop found, skipping" $dl.Identity.ToString() -ForegroundColor Yellow
+            Write-ToDisplay ("Loop found, skipping: {}" + $dl.Identity.ToString() + "{Yellow}")
         }
     }
     else {
-        # Get members, if dynamic - just set to zero members since we don't need to expand it; we just want to know if the sender is in the accept/reject list of the DL itself, not worry about the members of the dynamic DL
+        # Get members, if dynamic - just set to zero members since we don't need to expand it;
+        # we just want to know if the sender is in the accept/reject list of the DL itself
         $Script:HashGroupsFound.Add($dl.Guid.ToString(), 1)
         if (-not $isDynamicDL) {
             [array]$members = Get-DistributionGroupMember $dl.PrimarySmtpAddress -ResultSize unlimited
@@ -74,15 +124,14 @@ function RecursivelyCheckDL
         
         # Show DL count info, warning if more than 500 members
         if ($members.Count -ge 500) {
-            Write-Host ($dl.DisplayName + " (" + $dl.PrimarySmtpAddress.ToString() + ") ") -NoNewline
-            Write-Host $members.Count -ForegroundColor Yellow
+            Write-ToDisplay ($dl.DisplayName + "{Cyan} (" + $dl.PrimarySmtpAddress.ToString() + ") " + $members.Count + "{Red}")
         }
         else {
             if ($isDynamicDL) {
-                Write-Host ($dl.DisplayName + " (" + $dl.PrimarySmtpAddress.ToString() + ") <Dynamic DL>")
+                Write-ToDisplay ($dl.DisplayName + "{Cyan} (" + $dl.PrimarySmtpAddress.ToString() + ") <Dynamic DL>")
             }
             else {
-                Write-Host ($dl.DisplayName + " (" + $dl.PrimarySmtpAddress.ToString() + ") " + $members.Count)
+                Write-ToDisplay ($dl.DisplayName + "{Cyan} (" + $dl.PrimarySmtpAddress.ToString() + ") " + $members.Count)
             }
         }
         
@@ -105,47 +154,43 @@ function RecursivelyCheckDL
             foreach ($acceptEntry in $acceptList) {
                 foreach ($keyword in $ListKeywords) {
                     $stringMatch = $keyword.Keyword
+                    # Check if sender-keyword matches PrimarySmtpAddress
                     if ($acceptEntry.PrimarySmtpAddress.ToString() -match $stringMatch) {
                         $acceptEntry.Found = $true
                         $keyword.Found = $true
                     }
-                }
-                foreach ($keyword in $ListKeywords) {
-                    $stringMatch = $keyword.Keyword
+                    # Check if sender-keyword matches DisplayName
                     if ($acceptEntry.DisplayName -match $stringMatch) {
                         $acceptEntry.Found = $true
                         $keyword.Found = $true
                     }
                 }
             }
-            
+
             # Show our results
-            $counter = 0
+            Write-ToDisplay ("   Accept")
             foreach ($acceptEntry in ($acceptList | Sort-Object PrimarySmtpAddress)) {
-                if ($counter -eq 0) {
-                    Write-Host "   Accept --> " -NoNewline} else {Write-Host "              " -NoNewline
-                }
-                $counter++
                 if ($acceptEntry.Found) {
-                    Write-Host $acceptEntry.PrimarySmtpAddress.ToString() -ForegroundColor Green
+                    Write-ToDisplay ("      " + $acceptEntry.PrimarySmtpAddress.ToString() + " {Green}[matches sender]")
                 }
                 else {
-                    Write-Host $acceptEntry.PrimarySmtpAddress.ToString()
+                    Write-ToDisplay ("      " + $acceptEntry.PrimarySmtpAddress.ToString())
                 }
             }
             foreach ($keyword in $ListKeywords) {
                 if (-not $keyword.Found) {
-                    Write-Host "   Accept --> $($keyword.Keyword) not found"  -ForegroundColor Red
-                    $Script:DlsToFixAccept += $dl
+                    Write-ToDisplay ("   Accept -> " + $keyword.Keyword + " not found")
+                    $Script:DlsToFixAccept += [PSCustomObject]@{
+                        dl = $dl
+                        sender = $keyword
+                    }
                 }
             }
         }
+        # DL has no accept-restrictions
         else {
-            if ($members.Count -ge 500) {
-                Write-Host "   Accept -->" -ForegroundColor Red
-            }
-            else {
-                if ($Script:MoreDetails) {Write-Host "   Accept --> <none>"}
+            if ($Script:MoreDetails) {
+                Write-ToDisplay "   Accept -> <none>"
             }
         }
         
@@ -158,46 +203,54 @@ function RecursivelyCheckDL
             }
             $rejectList | ForEach-Object {$_ | Add-Member -MemberType NoteProperty -Name 'Found' -Value $false -Force}
 
-            # Loop and see if it matches our sender/keywords
-            $isFound = $false
-            foreach ($rejectEntry in $rejectList) {
-                foreach ($keyword in $Script:Keywords.Split(',')) {
-                    $keyword = $keyword.Trim().ToLower()
-                    if ($rejectEntry.PrimarySmtpAddress.ToString() -match $keyword) {
-                        $rejectEntry.Found = $true
-                    }
-                }
-                foreach ($keyword in $Script:Keywords.Split(',')) {
-                    $keyword = $keyword.Trim().ToLower()
-                    if ($rejectEntry.DisplayName -match $keyword) {
-                        $rejectEntry.Found = $true
-                    }
-                }
-                if ($rejectEntry.Found) {
-                    $isFound = $true
-                }
+            # Prepare the list of keywords to match
+            $ListKeywords = @()
+            foreach ($keyword in $Script:Keywords.Split(',')) {
+                $ListKeywords += New-Object PSObject -Property @{Keyword = $keyword.Trim().ToLower(); Found = $false}
             }
             
+            # Loop and see if it matches our sender/keywords
+            foreach ($rejectEntry in $rejectList) {
+                foreach ($keyword in $ListKeywords) {
+                    $stringMatch = $keyword.Keyword
+                    # Check if sender-keyword matches PrimarySmtpAddress
+                    if ($rejectEntry.PrimarySmtpAddress.ToString() -match $stringMatch) {
+                        $rejectEntry.Found = $true
+                        $keyword.Found = $true
+                    }
+                    # Check if sender-keyword matches DisplayName
+                    if ($rejectEntry.DisplayName -match $stringMatch) {
+                        $rejectEntry.Found = $true
+                        $keyword.Found = $true
+                    }
+                }
+            }
+
             # Show our results
-            if ($isFound) {
-                $counter = 0
-                foreach ($rejectEntry in $rejectList) {
-                    if ($counter -eq 0) {
-                        Write-Host "   Reject --> " -NoNewline} else {Write-Host "              " -NoNewline
-                    }
-                    $counter++
-                    if ($rejectEntry.Found) {
-                        Write-Host $rejectEntry.PrimarySmtpAddress.ToString() -ForegroundColor Red
-                        $Script:DlsToFixReject += $dl
-                    }
-                    else {
-                        Write-Host $rejectEntry.PrimarySmtpAddress.ToString()
+            Write-ToDisplay ("   Reject")
+            foreach ($rejectEntry in ($rejectList | Sort-Object PrimarySmtpAddress)) {
+                if ($rejectEntry.Found) {
+                    Write-ToDisplay ("      " + $rejectEntry.PrimarySmtpAddress.ToString() + " {Red}[matches sender]")
+                }
+                else {
+                    Write-ToDisplay ("      " + $rejectEntry.PrimarySmtpAddress.ToString())
+                }
+            }
+            foreach ($keyword in $ListKeywords) {
+                if ($keyword.Found) {
+                    Write-ToDisplay ("   Reject -> " + $keyword.Keyword + " found")
+                    $Script:DlsToFixReject += [PSCustomObject]@{
+                        dl = $dl
+                        sender = $keyword
                     }
                 }
             }
         }
+        # DL has no reject-restrictions
         else {
-            if ($Script:MoreDetails) {Write-Host "   Reject --> <none>"}
+            if ($Script:MoreDetails) {
+                Write-ToDisplay "   Reject -> <none>"
+            }
         }
         
         # Loop thru all members and recursively call if it's a DL; if it's a user, add to our hash of members
@@ -216,7 +269,14 @@ function RecursivelyCheckDL
 }
 
 #------------------------------------------------------------------------------
-#-- Main program
+# Test if we are running in an Azure Automation runbook
+#------------------------------------------------------------------------------
+function Test-SessionInRunbook {
+    return $env:AZUREPS_HOST_ENVIRONMENT -eq "AzureAutomation"
+}
+
+#------------------------------------------------------------------------------
+# Main program
 #------------------------------------------------------------------------------
 $startTime = Get-Date
 if ([int]$PSVersionTable.PSVersion.Major -ge 7) {
@@ -240,29 +300,41 @@ if ($DistributionLists.Trim().Length -eq 0 -or $listOfDLs.Count -eq 0 -or $Scrip
     return
 }
 
+# If we are in an Azure Automation runbook, attempt to authenticate to Exchange Online using a managed identity; if not in Azure Automation, assume we are already authenticated to Exchange Online.
+if (Test-SessionInRunbook) {
+    $Script:IsRunbook = $true
+    try {
+        Connect-ExchangeOnline -ManagedIdentity -Organization tionetworks.onmicrosoft.com
+        Write-ToDisplay "Successfully authenticated to Exchange Online using managed identity.{Green}"
+    }
+    catch {
+        Write-ToDisplay "Failed to authenticate to Exchange Online using managed identity. Please ensure the runbook has a system-managed identity configured."
+        exit
+    }
+}
+
 # Loop thru list of DLs, and show total members/groups found in all DLs
 $Script:HashMembers = @{}
 $Script:HashGroupsFound = @{}
 foreach ($itemDL in $listOfDLs) {
     RecursivelyCheckDL -DLName $itemDL
 }
-Write-Host "Total users:" $Script:HashMembers.Count
-Write-Host "Total groups:" $Script:HashGroupsFound.Count
-Write-Host ' '
+Write-ToDisplay ("Total users: " + $Script:HashMembers.Count)
+Write-ToDisplay ("Total groups: " + $Script:HashGroupsFound.Count)
 
 # Show final results
 if ($Script:DlsToFixAccept.Count -gt 0) {
-    Write-Host "DLs to add user to accept list:"
-    foreach ($dl in $Script:DlsToFixAccept) {
-        Write-Host "  " + $dl.DisplayName -NoNewline
-        Write-Host (" (" + $dl.PrimarySmtpAddress.ToString() + ")") -ForegroundColor Green
+    Write-ToDisplay "DLs to add user to accept list:"
+    foreach ($dlFix in $Script:DlsToFixAccept) {
+        Write-ToDisplay ("   +" + $dlFix.dl.DisplayName + "{} (" + $dlFix.dl.PrimarySmtpAddress.ToString() + `
+            "){Green} " + $dlFix.sender.Keyword + "{}")
     }
 }
 if ($Script:DlsToFixReject.Count -gt 0) {
-    Write-Host "DLs to remove user from reject list:"
-    foreach ($dl in $Script:DlsToFixReject) {
-        Write-Host "  " + $dl.DisplayName -NoNewline
-        Write-Host (" (" + $dl.PrimarySmtpAddress.ToString() + ")") -ForegroundColor Red
+    Write-ToDisplay "DLs to remove user from reject list:"
+    foreach ($dlFix in $Script:DlsToFixReject) {
+        Write-ToDisplay ("   -" + $dlFix.dl.DisplayName + "{} (" + $dlFix.dl.PrimarySmtpAddress.ToString() +    
+        "){Red} " + $dlFix.sender.Keyword + "{}")
     }
 }
-Write-Host "Run time: " -NoNewline; Write-Host ((Get-Date) - $startTime).ToString() -ForegroundColor Yellow
+Write-ToDisplay ("Run time: {}" + ((Get-Date) - $startTime).ToString() + "{Yellow}")
