@@ -1,14 +1,23 @@
 <#
 .SYNOPSIS
-    Send alert emails when failures are detected in the email tracking process, and optionally send a daily summary email with the status of all tracked emails.
+    Send alert emails when failures are detected in the email tracking process, and optionally send a daily summary email
+        with the status of all tracked emails.
 .DESCRIPTION
-    This script is the third part of a three-script set that is responsible for sending alert emails when failures are detected in the email tracking process. It reads from a CSV tracker file to identify any emails that have a "Fail" status and sends an alert email with the details of those failures. The script also includes functionality to send a daily summary email with the status of all tracked emails.
+    This script is the third part of a three-script set that is responsible for sending alert emails when failures are
+        detected in the email tracking process. It reads from a CSV tracker file to identify any emails that have a
+        "Fail" status and sends an alert email with the details of those failures. The script also includes functionality
+        to send a daily summary email with the status of all tracked emails.
 .NOTES
-    - The script uses a lock file mechanism to manage concurrent access to the CSV tracker file, ensuring that updates to the tracker are done safely without conflicts.
-    - The alert email includes a table with details of each failure, such as the unique identifier, sender email, sent date, received date, status, and alert count.
-    - The daily summary email provides an overview of all tracked emails and their statuses.
-    - CsvFileTracker has the Status property, with only 2 possible values: "Success" or "Fail".
-    - Has an optional daily summary email that can be sent at a specific hour (e.g., 8 AM) with the status of all tracked emails.
+    Modules needed: none (using built-in PowerShell cmdlets and Invoke-WebRequest for Graph API calls)
+    Requires a service princial with Microsoft Graph app-permissions of Mail.Send for the source shared mailbox in GEICO.
+    The script uses a lock file mechanism to manage concurrent access to the CSV tracker file, ensuring that updates to the
+        tracker are done safely without conflicts.
+    The alert email includes a table with details of each failure, such as the unique identifier, sender email, sent date,
+        received date, status, and alert count.
+    The daily summary email provides an overview of all tracked emails and their statuses.
+    CsvFileTracker has the Status property, with only 2 possible values: "Success" or "Fail".
+    Has an optional daily summary email that can be sent at a specific hour (e.g., 8 AM) with the status of all tracked emails.
+    Requires PowerShell 7+ to run due to the use of some newer cmdlets and features.
 #>
 
 # Script-wide variables
@@ -20,7 +29,7 @@ $script:MaxAlerts = 2  # Maximum number of alerts to send for each "Status -eq '
 #------------------------------------------------------------------------------
 #-- Authenticate to Graph API using an Azure app/secret combination
 #------------------------------------------------------------------------------
-function Connect-Graph
+function Connect-ToGraph
 {
     param (
         [string]$TenantId,
@@ -34,7 +43,9 @@ function Connect-Graph
         client_secret = $ClientSecret
     }
     try {
-        $response = Invoke-WebRequest -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -Body $body -ContentType "application/x-www-form-urlencoded"
+        $response = Invoke-WebRequest -Method Post `
+            -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
+            -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -ErrorAction Stop
         $script:Token = ($response.Content | ConvertFrom-Json).access_token
     }
     catch {
@@ -63,7 +74,7 @@ function Send-MailAs
         message = @{
             subject = $Subject
             body = @{
-                contentType = "Text"
+                contentType = "HTML"
                 content = $Body
             }
             toRecipients = @(
@@ -78,7 +89,9 @@ function Send-MailAs
     }
     $jsonBody = $email | ConvertTo-Json -Depth 10
     # Send the email using Graph API
-    Invoke-WebRequest -Method Post -Uri $uri -ContentType "application/json" -Body $jsonBody -Headers @{Authorization = "Bearer $script:Token"}
+    Invoke-WebRequest -Method Post -Uri $uri -ContentType "application/json" `
+        -Body $jsonBody -Headers @{Authorization = "Bearer $script:Token"} `
+        -UseBasicParsing -ErrorAction SilentlyContinue
 }
 
 #------------------------------------------------------------------------------
@@ -135,9 +148,11 @@ function Send-Alert
     # Send an alert email about the failures found, if any
     if ($listFailures.Count -gt 0) {
         # Construct the alert email body with details of the failures        
-        $alertBody = "<html><body><table border='1' style='border-collapse: collapse;'><tr><th>Unique Identifier</th><th>Sender Email</th><th>Email Sent Date</th><th>Email Received Date</th><th>Status</th><th>Alert Count</th></tr>"
+        $alertBody = "<html><body><table border='1' style='border-collapse: collapse; font-size:13px;'><tr><th>Unique Identifier</th><th>Sender Email</th><th>Email Sent Date</th><th>Email Received Date</th><th>Status</th><th>Alert Count</th></tr>"
         foreach ($failure in $listFailures) {
-            $alertBody += "<tr><td>$($failure.UniqueIdentifier)</td><td>$($failure.SenderEmail)</td><td>$($failure.EmailSentDate)</td><td>$($failure.EmailReceivedDate)</td><td>$($failure.Status)</td><td>$($failure.AlertCount)</td></tr>"
+            $dateSent = Get-Date($failure.EmailSentDate) -Format "yyyy-MM-dd HH:mm:ss zzz"
+            $dateReceived = if ($failure.EmailReceivedDate.Length -gt 0) { Get-Date($failure.EmailReceivedDate) -Format "yyyy-MM-dd HH:mm:ss zzz" } else { "N/A" }
+            $alertBody += "<tr><td>$($failure.UniqueIdentifier)</td><td>$($failure.SenderEmail)</td><td>$dateSent</td><td>$dateReceived</td><td>$($failure.Status)</td><td>$($failure.AlertCount)</td></tr>"
         }
         $alertBody += "</table></body></html>"
         $alertBody | Out-File -FilePath ".\zz.html" -Encoding utf8
@@ -163,14 +178,68 @@ function Send-DailySummary
             throw "Tracker file does not exist: $script:CsvFileTrackerPath"
         }
         # Read the CSV tracker file and construct the summary email body
-        $csvData = Import-Csv -Path $script:CsvFileTrackerPath | Where-Object {[datetime]$_.EmailSentDate -ge (Get-Date).AddDays(-1)} # Only include emails sent in the last 24 hours for the summary
-        $summaryBody = "<html><body><table border='1' style='border-collapse: collapse;'><tr><th>Unique Identifier</th><th>Sender Email</th><th>Email Sent Date</th><th>Email Received Date</th><th>Status</th></tr>"
+        # Only include emails sent in the last 24 hours for the summary
+        $csvData = Import-Csv -Path $script:CsvFileTrackerPath |
+            Where-Object {[datetime]$_.EmailSentDate -ge (Get-Date).AddDays(-1)}
+        # Add column for transit time (time between sent and received)
+        $csvData | ForEach-Object {$_ | Add-Member -MemberType NoteProperty -Name "TransitTime" -Value "N/A"}
+        foreach ($data in $csvData) {
+            if ($data.EmailReceivedDate.Length -gt 0 -and $data.EmailSentDate.Length -gt 0) {
+                $sent = Get-Date $data.EmailSentDate
+                $received = Get-Date $data.EmailReceivedDate
+                $data.TransitTime = ($received - $sent).TotalMinutes.ToString("F2")
+            }
+        }
+        # Create the table for the email body
+        $foundErrors = $false
+        $foundWarnings = $false
+        $summaryBody = "<html><body><placeholder><table border='1' style='border-collapse: collapse; font-size:13px;'>`
+            <tr><th>Unique Identifier</th>`
+            <th>Sender Email</th>`
+            <th>Email Sent Date</th>`
+            <th>Email Received Date</th>`
+            <th>Status</th>`
+            <th>Transit Time (minutes)</th></tr>"
         foreach ($entry in $csvData) {
-            $summaryBody += "<tr><td>$($entry.UniqueIdentifier)</td><td>$($entry.SenderEmail)</td><td>$($entry.EmailSentDate)</td><td>$($entry.EmailReceivedDate)</td><td>$($entry.Status)</td></tr>"
+            $dateSent = Get-Date($entry.EmailSentDate) -Format "yyyy-MM-dd HH:mm:ss zzz"
+            $dateReceived = if ($entry.EmailReceivedDate.Length -gt 0) { Get-Date($entry.EmailReceivedDate) `
+                -Format "yyyy-MM-dd HH:mm:ss zzz" } else { "N/A" }
+            # Change the color of the Status column based on Success/Fail
+            $colorStatus = "Green"
+            if ($entry.Status -eq "Fail") {
+                $colorStatus = "Red"
+                $foundErrors = $true
+            }
+            # Change the color of the Transit Time column if transit time is greater than 5 minutes
+            $colorTransit = "Black"
+            if ($entry.TransitTime -ne "N/A" -and [double]$entry.TransitTime -gt 5) {
+                $colorTransit = "OrangeRed"
+                $foundWarnings = $true
+            }
+            $summaryBody += "<tr><td>$($entry.UniqueIdentifier)</td>`
+                <td>$($entry.SenderEmail)</td>`
+                <td>$dateSent</td>`
+                <td>$dateReceived</td>`
+                <td style='color:$colorStatus'>$($entry.Status)</td>`
+                <td style='color:$colorTransit' align='right'>$($entry.TransitTime)</td></tr>"
         }
         $summaryBody += "</table></body></html>"
+        # Replace the placeholder in the summary body with an appropriate header based on whether errors or warnings were found
+        if ($foundErrors) {
+            $summaryBody = $summaryBody.Replace("<placeholder>", "<h2 style='color:Red;'>Errors found in email tracking</h2>")
+        }
+        elseif ($foundWarnings) {
+            $summaryBody = $summaryBody.Replace("<placeholder>", "<h2 style='color:Orange;'>Warnings found in email tracking</h2>")
+        }
+        else {
+            $summaryBody = $summaryBody.Replace("<placeholder>", "<h2 style='color:Green;'>No issues found in email tracking</h2>")
+        }
+        # Create a temp copy of the summary email body for debugging purposes, and send the email
         $summaryBody | Out-File -FilePath ".\zz_summary.html" -Encoding utf8
-        Send-MailAs -SenderEmail $SenderEmail -RecipientEmail $RecipientEmail -Subject "Daily Summary: Email tracking status" -Body $summaryBody
+        Send-MailAs -SenderEmail $SenderEmail `
+            -RecipientEmail $RecipientEmail `
+            -Subject "Daily Summary: Email tracking status" `
+            -Body $summaryBody
     }
 }
 
@@ -199,10 +268,10 @@ function Write-ScriptExecution
 #-- Main script
 #------------------------------------------------------------------------------
 Write-ScriptExecution -Action "Start" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
-$clientId = "service-principal-id"
-$tenantId = "tenant-id"
-$clientSecret = Get-Secret -Name 'store-name' -Vault 'SecretStore' -AsPlainText
-Connect-Graph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
-Send-Alert -SenderEmail "smb1@somedomain1.com" -RecipientEmail "someone@geico.com"
-Send-DailySummary -SenderEmail "smb1@somedomain.com" -RecipientEmail "someone@geico.com" -HourToSend 16
+$clientId = "something" # email-exchange-readyonly-appreg
+$tenantId = "something" # GEICO
+$clientSecret = Get-Secret -Name ("geicosecret_" + $clientId) -Vault "SecretStore" -AsPlainText
+Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
+Send-Alert -SenderEmail "111@geico.com" -RecipientEmail "222@geico.com"
+Send-DailySummary -SenderEmail "111m@geico.com" -RecipientEmail "222@geico.com" -HourToSend 14
 Write-ScriptExecution -Action "End" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
