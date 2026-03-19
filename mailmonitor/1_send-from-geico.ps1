@@ -175,22 +175,22 @@ function Write-ScriptExecution
 # Main
 #------------------------------------------------------------------------------
 Write-ScriptExecution -Action "Start" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
-$clientId = "55d8f305-44f4-4f18-bfff-3be2119a0247" # email-exchange-readyonly-appreg
-$tenantId = "7389d8c0-3607-465c-a69f-7d4426502912" # GEICO
+$clientId = "something" # email-exchange-readyonly-appreg
+$tenantId = "something" # GEICO
 $clientSecret = Get-Secret -Name ("geicosecret_" + $clientId) -Vault "SecretStore" -AsPlainText
 Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
 
 # Compile our list of senders
 $listSenders = @()
-$listSenders += "BusMesTestGeicoCom@geico.com"
-$listSenders += "BusMesTestBoatUSCom@boatus.com"
-$listSenders += "BusMesTestBoatUSOrg@boatus.org"
-$listSenders += "BusMesTestGeicoCom@geico.com"
-$listSenders += "BusMesTestGeicoConnectCom@geicoconnect.com"
-$listSenders += "BusMesTestGeicoMarineCom@geicomarine.com"
+$listSenders += "111@geico.com"
+$listSenders += "222@boatus.com"
+$listSenders += "333@boatus.org"
+$listSenders += "444@geico.com"
+$listSenders += "555@geicoconnect.com"
+$listSenders += "777@geicomarine.com"
 
 # Send a test mail from each domain
-$toAddress = "busmestest1@ppgeico.com"
+$toAddress = "888@ppgeico.com"
 foreach ($fromAddress in $listSenders) {
     $subject = New-RandomString
     if (Update-CsvFileTracker -UniqueIdentifier $subject -SenderEmail $fromAddress) {
