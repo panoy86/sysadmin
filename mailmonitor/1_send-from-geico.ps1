@@ -5,8 +5,9 @@
     This script is the first part of a three-script set that is responsible for sending "monitor-type" emails from a shared mailbox in GEICO to PPGEICO. It generates a unique identifier for each email, sends the email using the Graph API, and updates a tracker CSV file with the details of the sent email.
     It authenticates to the Graph API using client credentials and then sends an email on behalf of a specified sender.
 .NOTES
-    - Needs a valid shared mailbox for the sender email address, and the app registration must have the appropriate permissions (e.g., Mail.Send) granted and consented.
-    - CsvFileTracker has the Status property, with only 2 possible values: "Success" or "Fail".
+    Modules needed: none (using built-in PowerShell cmdlets and Invoke-WebRequest for Graph API calls)
+    Requires a service princial with Microsoft Graph app-permissions of Mail.Send for the source shared mailbox in GEICO.
+    CsvFileTracker has the Status property, with only 2 possible values: "Success" or "Fail".
 #>
 
 # Script-wide variables
@@ -15,9 +16,9 @@ $script:CsvFileTrackerPath = "C:\Scripts\mailmonitor\EmailTracker.csv"  # Use fu
 $script:LockFilePath = "C:\Scripts\mailmonitor\EmailTracker.lock"       # Path for lock file to manage concurrent access to CSV tracker file
 
 #------------------------------------------------------------------------------
-#-- Authenticate to Graph API using an Azure app/secret combination
+# Authenticate to Graph API using an Azure app/secret combination
 #------------------------------------------------------------------------------
-function Connect-Graph
+function Connect-ToGraph
 {
     param (
         [string]$TenantId,
@@ -31,7 +32,9 @@ function Connect-Graph
         client_secret = $ClientSecret
     }
     try {
-        $response = Invoke-WebRequest -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -Body $body -ContentType "application/x-www-form-urlencoded"
+        $response = Invoke-WebRequest -Method Post `
+            -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
+            -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -ErrorAction Stop
         $script:Token = ($response.Content | ConvertFrom-Json).access_token
     }
     catch {
@@ -41,7 +44,7 @@ function Connect-Graph
 }
 
 #------------------------------------------------------------------------------
-#-- Send mail using Graph API
+# Send mail using Graph API
 #------------------------------------------------------------------------------
 function Send-MailAs
 {
@@ -51,7 +54,7 @@ function Send-MailAs
         [string]$Subject,
         [string]$Body
     )
-    Write-Host "Sending as" $SenderEmail "to" $RecipientEmail
+    Write-Host "Sending as" $SenderEmail "to" $RecipientEmail -ForegroundColor Cyan
     Write-Host "Subject:" $Subject
     Write-Host "Body:" $Body
     # Construct the email payload for Graph API
@@ -75,11 +78,13 @@ function Send-MailAs
     }
     $jsonBody = $email | ConvertTo-Json -Depth 10
     # Send the email using Graph API
-    Invoke-WebRequest -Method Post -Uri $uri -ContentType "application/json" -Body $jsonBody -Headers @{Authorization = "Bearer $script:Token"}
+    Invoke-WebRequest -Method Post -Uri $uri -ContentType "application/json" `
+        -Body $jsonBody -Headers @{Authorization = "Bearer $script:Token"} `
+        -UseBasicParsing -ErrorAction Stop
 }
 
 #------------------------------------------------------------------------------
-#-- Update CSV tracker file with email details and status
+# Update CSV tracker file with email details and status
 #------------------------------------------------------------------------------
 function Update-CsvFileTracker
 {
@@ -136,7 +141,7 @@ function Update-CsvFileTracker
 }
 
 #------------------------------------------------------------------------------
-#-- Create a random 15-character string to use as a unique identifier
+# Create a random 15-character string to use as a unique identifier
 #------------------------------------------------------------------------------
 function New-RandomString
 {
@@ -146,7 +151,7 @@ function New-RandomString
 }
 
 #------------------------------------------------------------------------------
-#-- Log start and end of the script execution with timestamps
+# Log start and end of the script execution with timestamps
 #------------------------------------------------------------------------------
 function Write-ScriptExecution
 {
@@ -167,19 +172,32 @@ function Write-ScriptExecution
 }
 
 #------------------------------------------------------------------------------
-#-- Main
+# Main
 #------------------------------------------------------------------------------
 Write-ScriptExecution -Action "Start" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
-$clientId = "service-principal-id"
-$tenantId = "tenant-id"
-$clientSecret = Get-Secret -Name 'store-name' -Vault 'SecretStore' -AsPlainText
-Connect-Graph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret    
+$clientId = "55d8f305-44f4-4f18-bfff-3be2119a0247" # email-exchange-readyonly-appreg
+$tenantId = "7389d8c0-3607-465c-a69f-7d4426502912" # GEICO
+$clientSecret = Get-Secret -Name ("geicosecret_" + $clientId) -Vault "SecretStore" -AsPlainText
+Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
 
-# Send from geico.com to ppgeico.com
-$subject = New-RandomString
-$fromAddress = "smb1@somedomain1.com"
-$toAddress = "smb2@somedomain2.com"
-if (Update-CsvFileTracker -UniqueIdentifier $subject -SenderEmail $fromAddress) {
-    Send-MailAs -SenderEmail $fromAddress -RecipientEmail $toAddress -Subject $subject -Body "For monitoring purpose only. Please ignore. This email is sent from an automated script to test email sending and tracking functionality."
+# Compile our list of senders
+$listSenders = @()
+$listSenders += "BusMesTestGeicoCom@geico.com"
+$listSenders += "BusMesTestBoatUSCom@boatus.com"
+$listSenders += "BusMesTestBoatUSOrg@boatus.org"
+$listSenders += "BusMesTestGeicoCom@geico.com"
+$listSenders += "BusMesTestGeicoConnectCom@geicoconnect.com"
+$listSenders += "BusMesTestGeicoMarineCom@geicomarine.com"
+
+# Send a test mail from each domain
+$toAddress = "busmestest1@ppgeico.com"
+foreach ($fromAddress in $listSenders) {
+    $subject = New-RandomString
+    if (Update-CsvFileTracker -UniqueIdentifier $subject -SenderEmail $fromAddress) {
+        Send-MailAs -SenderEmail $fromAddress `
+            -RecipientEmail $toAddress `
+            -Subject $subject `
+            -Body "For monitoring purpose only. Please ignore. This email is sent from an automated script to test email sending and tracking functionality."
+    }
 }
 Write-ScriptExecution -Action "End" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
