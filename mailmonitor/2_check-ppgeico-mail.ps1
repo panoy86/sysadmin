@@ -2,10 +2,19 @@
 .SYNOPSIS
     Check the received emails in PPGEICO shared mailbox and update the tracker CSV file with the status of each email.
 .DESCRIPTION
-    This script is the second part of a three-script set that checks the received emails from a shared mailbox in PPGEICO. It references a tracker file that contains unique subject identifiers for the sent emails, and it updates the tracker file with the received date and status of each email. This script is meant to be run after 1_send-from-geico.ps1 has been executed to send the test emails.
+    This script is the second part of a three-script set that checks the received emails from a shared mailbox in PPGEICO.
+    It references a tracker file that contains unique subject identifiers for the sent emails, and it updates the tracker
+        file with the received date and status of each email. This script is meant to be run after 1_send-from-geico.ps1
+        has been executed to send the test emails.
 .NOTES
-    - CsvFileTracker has the Status property, with only 2 possible values: "Success" or "Fail".
-    - Change the $script:MaxCheckAttempts variable in the script to adjust how many times the script will check for an email before marking it as "Fail" in the tracker.  If for example you set it to 3, the script will check for the email up to 3 times (each time you run the script) and if after the 3rd check the email is still not found, it will update the tracker with "Fail" status for that email entry.
+    Modules needed: none (using built-in PowerShell cmdlets and Invoke-WebRequest for Graph API calls)
+    Requires a service principal with Microsoft Graph app-permissions of Mail.ReadBasic for the target mailbox in PPGEICO.
+    CsvFileTracker has the Status property, with only 2 possible values: "Success" or "Fail".
+    Change the $script:MaxCheckAttempts variable in the script to adjust how many times the script will check for an email
+        before marking it as "Fail" in the tracker.  If for example you set it to 3, the script will check for the email up
+        to 3 times (each time you run the script) and if after the 3rd check the email is still not found, it will update
+        the tracker with "Fail" status for that email entry.
+    Requires PowerShell 7+ to run due to the use of some newer cmdlets and features.
 #>
 
 # Script-wide variables
@@ -16,9 +25,9 @@ $script:ListMessages = @()    # Initialize an array to store messages retrieved 
 $script:MaxCheckAttempts = 3  # Maximum number of check attempts for each email before marking as "Fail"
 
 #------------------------------------------------------------------------------
-#-- Authenticate to Graph API using an Azure app/secret combination
+# Authenticate to Graph API using an Azure app/secret combination
 #------------------------------------------------------------------------------
-function Connect-Graph
+function Connect-ToGraph
 {
     param (
         [string]$TenantId,
@@ -32,7 +41,9 @@ function Connect-Graph
         client_secret = $ClientSecret
     }
     try {
-        $response = Invoke-WebRequest -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -Body $body -ContentType "application/x-www-form-urlencoded"
+        $response = Invoke-WebRequest -Method Post `
+            -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
+            -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -ErrorAction Stop
         $script:Token = ($response.Content | ConvertFrom-Json).access_token
     }
     catch {
@@ -42,7 +53,7 @@ function Connect-Graph
 }
 
 #------------------------------------------------------------------------------
-#-- Gets the Inbox content of a mailbox from the last 3 days only
+# Gets the Inbox content of a mailbox from the last 3 days only
 #------------------------------------------------------------------------------
 function Get-MailboxContent
 {
@@ -50,11 +61,14 @@ function Get-MailboxContent
         [string]$RecipientEmail
     )
     # Set the initial URI for retrieving messages from the recipient's mailbox, filtering for messages received in the last 3 days to limit results
-    $uri = "https://graph.microsoft.com/v1.0/users/$RecipientEmail/mailFolders/Inbox/messages?`$filter=receivedDateTime ge " + (Get-Date).AddDays(-3).ToString("o")
+    $uri = "https://graph.microsoft.com/v1.0/users/$RecipientEmail/mailFolders/Inbox/messages?`$filter=receivedDateTime ge " `
+        + (Get-Date).AddDays(-3).ToString("o")
     try {
         # Graph API may paginate results, so we need to loop through all pages to get the complete list of messages
         do {
-            $response = Invoke-WebRequest -Method Get -Uri $uri -Headers @{ Authorization = "Bearer $script:Token" }
+            $response = Invoke-WebRequest -Method Get -Uri $uri `
+                -Headers @{ Authorization = "Bearer $script:Token" } `
+                -UseBasicParsing -ErrorAction Stop
             [array]$script:ListMessages += ($response.Content | ConvertFrom-Json).value
             $uri = ($response.Content | ConvertFrom-Json)."@odata.nextLink"
         } while ($uri)
@@ -63,10 +77,23 @@ function Get-MailboxContent
         Write-Host "Failed to retrieve mailbox content for $RecipientEmail. Please check if the recipient email is correct and if the app has the necessary permissions."
         throw $_
     }
+    # Optional, set the messages to "read" status.  This requires a different permission (Mail.ReadWrite) than just retrieving the messages, so it is commented out by default.  If you want to use it, make sure to grant the app Mail.ReadWrite permission and uncomment the code below.
+    <#
+    if ($script:ListMessages.Count -gt 0) {
+        foreach ($message in $script:ListMessages) {
+            $graphUrl = "https://graph.microsoft.com/v1.0/users/$RecipientEmail/messages/$($message.id)"
+            $body = @{ isRead = $true } | ConvertTo-Json
+            try {
+                $response = Invoke-RestMethod -Method PATCH -Uri $graphUrl -Headers @{ Authorization = "Bearer $script:Token" } -Body $body -ContentType "application/json" -UseBasicParsing
+            }
+            catch {}
+        }
+    }
+    #>
 }
 
 #------------------------------------------------------------------------------
-#-- Updates the CSV tracker file with the received date and status for each email entry
+# Updates the CSV tracker file with the received date and status for each email entry
 #------------------------------------------------------------------------------
 function Update-CsvFileTracker
 {
@@ -92,29 +119,37 @@ function Update-CsvFileTracker
         }
     } while ($true)
     Write-Host "Lock acquired on CSV tracker file. Updating tracker..." -ForegroundColor Green
-    # Create a hashtable to store the email unique identifiers and their received dates for quick lookup
-    $hashEmails = @{}
+    # Create an array of subjects/recieve-date objects from the retrieved messages for easy lookup when updating the tracker entries
+    # Intially used a hash, but does not work if the original subject line gets modified in any way
+    $listSubjectReceiveDate = @()
     foreach ($message in $script:ListMessages) {
-        $hashEmails[$message.subject] = ($message.receivedDateTime).ToUniversalTime().ToString("o")
+        $listSubjectReceiveDate += New-Object pscustomobject -Property @{
+            Subject = $message.subject; 
+            ReceivedDateTime = ($message.receivedDateTime).ToUniversalTime().ToString("o")
+        }
     }
     # Read the existing CSV data
     $csvData = Import-Csv -Path $script:CsvFileTrackerPath
     # Update each entry in the CSV data with received date and status
-    foreach ($entry in $csvData) {
-        if ($entry.Status -notin ("Success", "Fail")) {
-            # See if we need to set the Status to "Fail" due to max check attempts
-            if ([int]$entry.CheckCount -ge $script:MaxCheckAttempts) {
-                $entry.Status = "Fail"
-                continue
-            }
-            # Else, increase our check count and update the last check date
-            $entry.CheckCount = [int]$entry.CheckCount + 1
-            $entry.LastCheckDate = ((Get-Date).ToUniversalTime()).ToString("o")
+    foreach ($trackerEntry in $csvData) {
+        if ($trackerEntry.Status -notin ("Success", "Fail")) {
+            # Increase our check count and update the last check date
+            $trackerEntry.CheckCount = [int]$trackerEntry.CheckCount + 1
+            $trackerEntry.LastCheckDate = ((Get-Date).ToUniversalTime()).ToString("o")
             # Then see if the unique identifier (which is the email subject) exists in the retrieved messages
-            $key = $entry.UniqueIdentifier
-            if ($hashEmails.ContainsKey($key)) {
-                $entry.EmailReceivedDate = $hashEmails[$key]
-                $entry.Status = "Success"
+            $key = $trackerEntry.UniqueIdentifier
+            foreach ($item in $listSubjectReceiveDate) {
+                if ($item.Subject -match $key) {
+                    Write-Host "Match found:" $item.Subject $key -ForegroundColor Green
+                    $trackerEntry.EmailReceivedDate = $item.ReceivedDateTime
+                    $trackerEntry.Status = "Success"
+                    break
+                }
+            }
+            # See if we need to set the Status to "Fail" due to max check attempts
+            if ($trackerEntry.Status -ne "Success" -and [int]$trackerEntry.CheckCount -ge $script:MaxCheckAttempts) {
+                $trackerEntry.Status = "Fail"
+                continue
             }
         }
     }
@@ -126,7 +161,7 @@ function Update-CsvFileTracker
 }
 
 #------------------------------------------------------------------------------
-#-- Log start and end of the script execution with timestamps
+# Log start and end of the script execution with timestamps
 #------------------------------------------------------------------------------
 function Write-ScriptExecution
 {
@@ -147,19 +182,19 @@ function Write-ScriptExecution
 }
 
 #------------------------------------------------------------------------------
-#-- Main
+# Main script execution
 #------------------------------------------------------------------------------
 Write-ScriptExecution -Action "Start" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
-$clientId = "service-principal-id"
-$tenantId = "tenant-id"
-$clientSecret = Get-Secret -Name 'store-name' -Vault 'SecretStore' -AsPlainText
-Connect-Graph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
+$clientId = "something"
+$tenantId = "something"
+$clientSecret = Get-Secret -Name 'busmes_ppgeico' -Vault 'SecretStore' -AsPlainText
+Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
 
 # Get emails from our target shared mailbox, only the last 5 days to limit the results
-Get-MailboxContent -RecipientEmail "smb2@somedomain2.com"
+Get-MailboxContent -RecipientEmail "111@ppgeico.com"
 Write-Host "Retrieved $($script:ListMessages.Count) messages from the mailbox." -ForegroundColor Green
 if ($script:ListMessages.Count -eq 0) {
-    Write-Host "No messages found in the mailbox for the last 5 days."
+    Write-Host "No messages found in the mailbox for the last 3 days."
     exit
 }
 
