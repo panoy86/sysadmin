@@ -12,15 +12,16 @@
     This command retrieves all members of DL1 and DL2, including nested DLs, and displays any members whose email addresses
     contain the keyword "john" along with the DLs they belong to.
 .NOTES
-    - The script uses recursion to find members of nested DLs.
-    - The output includes the total number of unique members found and the total number of DLs processed.
-    - The script generates a file named "emails-list.txt" containing the email addresses of all members found.
+    Requires an existing Exchange Online PowerShell session with appropriate permissions to read DL and recipient information.
+    The script uses recursion to find members of nested DLs.
+    The output includes the total number of unique members found and the total number of DLs processed.
+    The script generates a file named "emails-list.txt" containing the email addresses of all members found.
 #>
 
 param (
-    [string] $ListOfDLs, #-- Comma-separated list of DL to get the members list
-    [string] $Keyword,   #-- Optional keyword to match members against
-    [switch] $Verbose    #-- Show verbose output (for debugging purposes)
+    [string] $ListOfDLs, # Comma-separated list of DL to get the members list
+    [string] $Keyword,   # Optional keyword to match members against
+    [switch] $Verbose    # Show verbose output (for debugging purposes)
 )
 
 # Script-level variables
@@ -30,9 +31,9 @@ $script:TotalDLCount = 0
 $script:HashGroupsFound = @{}  # This is used to detect loops
 $script:MemberKeywordMatch = $null
 
-#---------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 # Recursive DL member retrieval function
-#---------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 function Get-DLMembersRecursive
 {
     param ([String] $DLIdentity, [Switch] $Toplevel)
@@ -70,12 +71,9 @@ function Get-DLMembersRecursive
                         $script:TotalDLCount++
                         Get-DLMembersRecursive -DLIdentity $member.PrimarySmtpAddress.ToString()
                     }
-                    #-- Add user-mailbox/mail-contact to list
+                    # Add user-mailbox/mail-contact to list
                     else {
                         $email = $member.PrimarySmtpAddress.ToString().ToLower().Trim()
-                        #if (-not $script:HashMembersEmail.ContainsKey($email)) {
-                        #    $script:HashMembersEmail.Add($email, $dl.Name)
-                        #}
                         # Add to the total list of unique members
                         if (-not $script:HashMembersEmail.ContainsKey($email)) {
                             $script:HashMembersEmail.Add($email, $member)
@@ -84,10 +82,10 @@ function Get-DLMembersRecursive
                         if (-not $script:HashMembersPerDL.ContainsKey($email)) {
                             $script:HashMembersPerDL.Add($email, 1)
                         }
-						#-- Check for the member keyword match
+						# Check for the member keyword match
 						if ($null -ne $script:MemberKeywordMatch) {
 							if ($email -match $script:MemberKeywordMatch) {
-								Write-Host "   match found: " -ForegroundColor Green -NoNewline
+								Write-Host "match found: " -ForegroundColor Green -NoNewline
                             	Write-Host $email "->" $DLIdentity
 							}
 						}
@@ -98,17 +96,25 @@ function Get-DLMembersRecursive
     }
     # If the DL is not found, check if it's a Dynamic Distribution List (DDL)
     else {
-        $ddl = $null
-        $ddl = Get-DynamicDistributionGroup -Identity $DLIdentity -ea SilentlyContinue
-        if ($null -ne $ddl) {
+        $dl = $null
+        $dl = Get-DynamicDistributionGroup -Identity $DLIdentity -ea SilentlyContinue
+        if ($null -ne $dl) {
             # Show progress
-            $dlMembers = Get-Recipient -RecipientPreviewFilter $ddl.RecipientFilter -ResultSize unlimited
-            Write-Host ("-> " + $ddl.Name + " (dynamic) " + $dlMembers.Count.ToString())
+            if ($Verbose) {
+                if ($Toplevel) {
+                    Write-Host ($dl.Alias + " (dynamic) ") -NoNewline
+                }
+                else {
+                    Write-Host ("-> " + $dl.Alias + " (dynamic) ") -NoNewline
+                }
+            }
+            $dlMembers = Get-Recipient -RecipientPreviewFilter $dl.RecipientFilter -ResultSize unlimited
+            if ($Verbose) {
+                 Write-Host $dlMembers.Count.ToString()
+            }
+            # Loop thru members
             foreach($member in $dlMembers) {
                 $email = $member.PrimarySmtpAddress.ToString().ToLower().Trim()
-                #if (-not $script:HashMembersEmail.ContainsKey($email)) {
-                #    $script:HashMembersEmail.Add($email, $ddl.Name)
-                #}
                 # Add to the total list of unique members
                 if (-not $script:HashMembersEmail.ContainsKey($email)) {
                     $script:HashMembersEmail.Add($email, $member)
@@ -120,20 +126,26 @@ function Get-DLMembersRecursive
                 # Check for the member keyword match
                 if ($null -ne $script:MemberKeywordMatch) {
                     if ($email -match $script:MemberKeywordMatch) {
-                        Write-Host "   match found: " -ForegroundColor Green -NoNewline
+                        Write-Host "match found: " -ForegroundColor Green -NoNewline
                         Write-Host $email "->" $DLIdentity #"->" $script:MemberKeywordMatch
                     }
                 }
             }
         }
-        else {Write-Host ($DLIdentity + " not found") -ForegroundColor Red}
+        else {
+            Write-Host ($DLIdentity + " not found") -ForegroundColor Red
+            return $null
+        }
     }
     Write-Progress -Activity "Finding member DLs" -Completed
+    if ($Toplevel) {
+        return $dl.Alias.ToString()
+    }
 }
 
-#------------------------------------------------------------------------------
+#----------------------------------------------------------------------------
 # Main
-#------------------------------------------------------------------------------
+#----------------------------------------------------------------------------
 if ([int]$PSVersionTable.PSVersion.Major -ge 7) {
     Import-Module PSReadLine -Force     # Fixes progress bar issues in PowerShell 7+
     $PSStyle.Progress.View = "Minimal"  # Other value: "Minimal", only works in PowerShell 7.2+
@@ -164,16 +176,21 @@ else {
 }
 
 # Loop thru the DLs
+$returnList = @()
 foreach ($DLIdentity in $listDls) {
     $script:HashMembersPerDL = @{}
-    Get-DLMembersRecursive -DLIdentity $DLIdentity.Trim() -Toplevel
+    $aliasDL = Get-DLMembersRecursive -DLIdentity $DLIdentity.Trim() -Toplevel
+    if ($null -ne $aliasDL) {
+        $returnList += New-Object PSObject -Property @{
+            DL = $aliasDL
+            MemberCount = $script:HashMembersPerDL.Count
+        }
+    }
     if ($Verbose) {
         Write-Host ($DLIdentity  + " (" + $script:HashMembersPerDL.Count + ")") -ForegroundColor Cyan
     }
 }
 if ($Verbose) {
-    #Write-Host "Total users:" $script:HashMembersEmail.Count
-    #Write-Host "Total DLs (duplicates allowed):" $script:TotalDLCount
     $rFinal = @()
     $rTmp = $script:HashMembersEmail.Get_Keys()
     foreach($t in $rTmp) {
@@ -183,9 +200,10 @@ if ($Verbose) {
     $rFinal | ForEach-Object {$rTmp += $_.PrimarySmtpAddress}
     $rTmp | Out-File -Encoding ASCII .\emails-list.txt
     Write-Host "File created: emails-list.txt"
-    #Write-Host "Members:" $rFinal.Count
 }
-return New-Object PSObject -Property @{
-    Identity = $ListOfDLs
-    TotalMembers = $script:HashMembersEmail.Count
+# Add the total count of unique members found across all DLs
+$returnList += New-Object PSObject -Property @{
+    DL = "Total"
+    MemberCount = $script:HashMembersEmail.Count
 }
+return $returnList
