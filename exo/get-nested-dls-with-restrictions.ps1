@@ -30,11 +30,11 @@ param (
 $Script:MoreDetails = $true # Set to $true to show the full accept/reject list of each DL; set to $false to only show the matching entries in the accept/reject list of each DL
 
 # Main program, do not change
-$Script:HashMembers = @{}      # This is used to keep track of all the unique members we found in our search, key is the member's guid
-$Script:HashGroupsFound = @{}  # This is used to detect loops; group1 is a member of group2, which is a member of group1
-$Script:DlsToFixAccept = @()   # This is used to keep track of DLs that we need to add the sender to the accept list
-$Script:DlsToFixReject = @()   # This is used to keep track of DLs that we need to remove the sender from the reject list
-$Script:IsRunbook = $false     # This is used to indicate if we are running in an Azure Automation runbook
+$Script:HashMembers = @{}      # To keep track of all the unique members we found in our search, key is the member's guid
+$Script:HashGroupsFound = @{}  # For detecting groups we already processed and skip those.
+$Script:DlsToFixAccept = @()   # To keep track of DLs that we need to add the sender to the accept list
+$Script:DlsToFixReject = @()   # To keep track of DLs that we need to remove the sender from the reject list
+$Script:IsRunbook = $false     # To indicate if we are running in an Azure Automation runbook
 
 #------------------------------------------------------------------------------
 # Function to handle output differently for runbook vs local sessions, so that
@@ -108,7 +108,7 @@ function RecursivelyCheckDL
     # if loop found, skip processing this DL since we already processed it when we hit it the first time
     if ($Script:HashGroupsFound.ContainsKey($dl.Guid.ToString())) {
         if ($Script:MoreDetails) {
-            Write-ToDisplay ("Loop found, skipping: {}" + $dl.Identity.ToString() + "{Yellow}")
+            Write-ToDisplay ("already processed, skipping: {}" + $dl.Identity.ToString() + "{Yellow}")
         }
     }
     else {
@@ -287,7 +287,7 @@ $ProgressPreference = "Continue"
 
 # Normalize the parameters
 $listOfDLs = @()
-$DistributionLists -split ' ' | ForEach-Object {$listOfDLs += $_.Trim()}
+$DistributionLists -split ',' | ForEach-Object {$listOfDLs += $_.Trim()}
 
 # If the parameters are empty, show command line usage and exit
 if ($DistributionLists.Trim().Length -eq 0 -or $listOfDLs.Count -eq 0 -or $Script:Keywords.Length -eq 0) {
