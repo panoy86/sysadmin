@@ -119,13 +119,13 @@ $tenantId = "25798ea0-b97a-44b0-b1d8-3747bb6a5f3e"
 $clientSecret = Get-Secret -Name 'busmes_ppgeico' -Vault 'SecretStore' -AsPlainText
 Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
 #>
-$clientId = "55d8f305-44f4-4f18-bfff-3be2119a0247" # email-exchange-readyonly-appreg
-$tenantId = "7389d8c0-3607-465c-a69f-7d4426502912" # GEICO
-$clientSecret = Get-Secret -Name ("geicosecret_" + $clientId) -Vault "SecretStore" -AsPlainText
+$clientId = "some app-id"
+$tenantId = "some tenant-id"
+$clientSecret = Get-Secret -Name ("secret_" + $clientId) -Vault "SecretStore" -AsPlainText
 Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
 
 # Get the sub-folders under the Inbox of the target mailbox
-$emailAddress = "bethanymack@geico.com"
+$emailAddress = "franaurtan@contoso.com"
 $parentFolderId = "Inbox"
 $script:ListOfFolders = @() # Clear the list of folders before populating it
 Get-MailboxSubFolders -RecipientEmail $emailAddress -ParentFolderId $parentFolderId
@@ -172,6 +172,6 @@ foreach ($folder in $script:ListOfFolders) {
     }
 }
 Write-Progress -Activity "Getting messages from" -Status "Completed" -PercentComplete 100
-#$listFoldersMessages
+# $listFoldersMessages
 # $listFoldersMsgCount | Format-Table -AutoSize
 $listFoldersMsgCount | Where-Object {$_.messageCount -gt 0} | Format-Table -AutoSize
