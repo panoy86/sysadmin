@@ -12,8 +12,8 @@
 
 # Script-wide variables
 $script:Token = $null
-$script:CsvFileTrackerPath = "C:\Scripts\mailmonitor\EmailTracker.csv"  # Use full path (relative path will fail)
-$script:LockFilePath = "C:\Scripts\mailmonitor\EmailTracker.lock"       # Path for lock file to manage concurrent access to CSV tracker file
+$script:CsvFileTrackerPath = "D:\Scripts\mailmonitor\EmailTracker.csv"  # Use full path (relative path will fail)
+$script:LockFilePath = "D:\Scripts\mailmonitor\EmailTracker.lock"       # Path for lock file to manage concurrent access to CSV tracker file
 
 #------------------------------------------------------------------------------
 # Authenticate to Graph API using an Azure app/secret combination
@@ -31,16 +31,29 @@ function Connect-ToGraph
         client_id     = $ClientId
         client_secret = $ClientSecret
     }
-    try {
-        $response = Invoke-WebRequest -Method Post `
-            -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
-            -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -ErrorAction Stop
-        $script:Token = ($response.Content | ConvertFrom-Json).access_token
-    }
-    catch {
-        Write-Host "Failed to acquire token for Graph API. Please check your tenant ID, client ID and client secret."
-        throw $_
-    }
+    # Retry 10 times in case of transient failures
+    $maxRetries = 10
+    $retryCount = 0
+    $success = $false
+    do {
+        try {
+            Write-Host "Acquiring token for Graph API... attempt $($retryCount + 1) of $maxRetries"
+            $response = Invoke-WebRequest -Method Post `
+                -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
+                -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -ErrorAction Stop
+            $script:Token = ($response.Content | ConvertFrom-Json).access_token
+            $success = $true
+            break
+        }
+        catch {
+            $retryCount++
+            if ($retryCount -ge $maxRetries) {
+                Write-Host "Failed to acquire token for Graph API after $maxRetries attempts. Please check your tenant ID, client ID and client secret."
+            }
+            Start-Sleep -Seconds 3
+        }
+    } while ($retryCount -lt $maxRetries)
+    return $success
 }
 
 #------------------------------------------------------------------------------
@@ -76,11 +89,26 @@ function Send-MailAs
         }
         saveToSentItems = $true
     }
+    # Send the email using Graph API, try 5 times
     $jsonBody = $email | ConvertTo-Json -Depth 10
-    # Send the email using Graph API
-    Invoke-WebRequest -Method Post -Uri $uri -ContentType "application/json" `
-        -Body $jsonBody -Headers @{Authorization = "Bearer $script:Token"} `
-        -UseBasicParsing -ErrorAction Stop
+    $retryCount = 0
+    $maxRetries = 5
+    do {
+        Try {
+            Invoke-WebRequest -Method Post -Uri $uri -ContentType "application/json" `
+                -Body $jsonBody -Headers @{Authorization = "Bearer $script:Token"} `
+                -UseBasicParsing -ErrorAction Stop
+            return $true
+        }
+        Catch {
+            $retryCount++
+            if ($retryCount -ge $maxRetries) {
+                Write-Host "Failed to send email from $SenderEmail to $RecipientEmail with subject $Subject after $maxRetries attempts. Exception: $($_.Exception.Message)" -ForegroundColor Red
+                return $false
+            }
+            Start-Sleep -Seconds 2
+        }
+    } while ($retryCount -lt $maxRetries)
 }
 
 #------------------------------------------------------------------------------
@@ -174,30 +202,45 @@ function Write-ScriptExecution
 #------------------------------------------------------------------------------
 # Main
 #------------------------------------------------------------------------------
-Write-ScriptExecution -Action "Start" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
-$clientId = "something" # email-exchange-readyonly-appreg
-$tenantId = "something" # GEICO
-$clientSecret = Get-Secret -Name ("geicosecret_" + $clientId) -Vault "SecretStore" -AsPlainText
-Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
+Write-ScriptExecution -Action "Start" -Logfile "D:\Scripts\mailmonitor\EmailMonitor.log"
+$clientId = "55d8f305-44f4-4f18-bfff-3be2119a0247" # email-exchange-readyonly-appreg
+$tenantId = "7389d8c0-3607-465c-a69f-7d4426502912" # GEICO
+$clientSecret = Get-Secret -Name ("geico_" + $clientId) -Vault "SecretStore" -AsPlainText
+if (Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret) {
+    # Compile our list of senders
+    $listSenders = @()
+    $listSenders += "BusMesTestGeicoCom@geico.com"
+    $listSenders += "BusMesTestBoatUSCom@boatus.com"
+    $listSenders += "BusMesTestBoatUSOrg@boatus.org"
+    $listSenders += "BusMesTestGeicoCom@geico.com"
+    $listSenders += "BusMesTestGeicoConnectCom@geicoconnect.com"
+    $listSenders += "BusMesTestGeicoMarineCom@geicomarine.com"
 
-# Compile our list of senders
-$listSenders = @()
-$listSenders += "111@geico.com"
-$listSenders += "222@boatus.com"
-$listSenders += "333@boatus.org"
-$listSenders += "444@geico.com"
-$listSenders += "555@geicoconnect.com"
-$listSenders += "777@geicomarine.com"
-
-# Send a test mail from each domain
-$toAddress = "888@ppgeico.com"
-foreach ($fromAddress in $listSenders) {
-    $subject = New-RandomString
-    if (Update-CsvFileTracker -UniqueIdentifier $subject -SenderEmail $fromAddress) {
-        Send-MailAs -SenderEmail $fromAddress `
+    # Send a test mail from each domain
+    $toAddress = "busmestest1@ppgeico.com"
+    foreach ($fromAddress in $listSenders) {
+        $subject = New-RandomString
+        if (Send-MailAs -SenderEmail $fromAddress `
             -RecipientEmail $toAddress `
             -Subject $subject `
-            -Body "For monitoring purpose only. Please ignore. This email is sent from an automated script to test email sending and tracking functionality."
+            -Body "For monitoring purpose only. Please ignore. This email is sent from an automated script to test email sending and tracking functionality.") {
+            Update-CsvFileTracker -UniqueIdentifier $subject -SenderEmail $fromAddress
+        }
+        else {
+            Export-Csv -Path "D:\Scripts\mailmonitor\SubmissionFailures.csv" -Append -NoTypeInformation -InputObject @{
+                SenderEmail = $fromAddress
+                RecipientEmail = $toAddress
+                Subject = $subject
+                Date = Get-Date
+            }
+        }
     }
 }
-Write-ScriptExecution -Action "End" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
+else {
+    Write-Host "Failed to connect to Graph API." -ForegroundColor Red
+    Export-Csv -Path "D:\Scripts\mailmonitor\GraphFailures.csv" -Append -NoTypeInformation -InputObject @{
+        Script = "1_send-from-geico.ps1"
+        Date = Get-Date
+    }
+}
+Write-ScriptExecution -Action "End" -Logfile "D:\Scripts\mailmonitor\EmailMonitor.log"
