@@ -19,10 +19,10 @@
 
 # Script-wide variables
 $script:Token = $null
-$script:CsvFileTrackerPath = "C:\Scripts\mailmonitor\EmailTracker.csv"  # Use full path (relative path will fail)
-$script:LockFilePath = "C:\Scripts\mailmonitor\EmailTracker.lock"       # Path for lock file to manage concurrent access to CSV tracker file
+$script:CsvFileTrackerPath = "D:\Scripts\mailmonitor\EmailTracker.csv"  # Use full path (relative path will fail)
+$script:LockFilePath = "D:\Scripts\mailmonitor\EmailTracker.lock"       # Path for lock file to manage concurrent access to CSV tracker file
 $script:ListMessages = @()    # Initialize an array to store messages retrieved from the mailbox
-$script:MaxCheckAttempts = 3  # Maximum number of check attempts for each email before marking as "Fail"
+$script:MaxCheckAttempts = 2  # Maximum number of check attempts for each email before marking as "Fail"
 
 #------------------------------------------------------------------------------
 # Authenticate to Graph API using an Azure app/secret combination
@@ -40,16 +40,32 @@ function Connect-ToGraph
         client_id     = $ClientId
         client_secret = $ClientSecret
     }
-    try {
-        $response = Invoke-WebRequest -Method Post `
-            -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
-            -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -ErrorAction Stop
-        $script:Token = ($response.Content | ConvertFrom-Json).access_token
-    }
-    catch {
-        Write-Host "Failed to acquire token for Graph API. Please check your tenant ID, client ID and client secret."
-        throw $_
-    }
+    # Retry 5 times in case of transient failures
+    $maxRetries = 5
+    $retryCount = 0
+    $success = $false
+    do {
+        try {
+            Write-Host "Acquiring token for Graph API... attempt $($retryCount + 1) of $maxRetries"
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 # Force TLS 1.2
+            $response = Invoke-WebRequest -Method Post `
+                -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
+                -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing -ErrorAction Stop
+            $script:Token = ($response.Content | ConvertFrom-Json).access_token
+            $success = $true
+            break
+        }
+        catch {
+            $retryCount++
+            if ($retryCount -ge $maxRetries) {
+                Write-Host "Failed to acquire token for Graph API after $maxRetries attempts. Please check your tenant ID, client ID and client secret."
+            }
+            else {
+                Start-Sleep -Seconds 2
+            }
+        }
+    } while ($retryCount -lt $maxRetries)
+    return $success
 }
 
 #------------------------------------------------------------------------------
@@ -66,6 +82,7 @@ function Get-MailboxContent
     try {
         # Graph API may paginate results, so we need to loop through all pages to get the complete list of messages
         do {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 # Force TLS 1.2
             $response = Invoke-WebRequest -Method Get -Uri $uri `
                 -Headers @{ Authorization = "Bearer $script:Token" } `
                 -UseBasicParsing -ErrorAction Stop
@@ -184,20 +201,26 @@ function Write-ScriptExecution
 #------------------------------------------------------------------------------
 # Main script execution
 #------------------------------------------------------------------------------
-Write-ScriptExecution -Action "Start" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
-$clientId = "something"
-$tenantId = "something"
-$clientSecret = Get-Secret -Name 'busmes_ppgeico' -Vault 'SecretStore' -AsPlainText
-Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
-
-# Get emails from our target shared mailbox, only the last 5 days to limit the results
-Get-MailboxContent -RecipientEmail "111@ppgeico.com"
-Write-Host "Retrieved $($script:ListMessages.Count) messages from the mailbox." -ForegroundColor Green
-if ($script:ListMessages.Count -eq 0) {
-    Write-Host "No messages found in the mailbox for the last 3 days."
-    exit
+Write-ScriptExecution -Action "Start" -Logfile "D:\Scripts\mailmonitor\EmailMonitor.log"
+$clientId = "e6e0c5f4-be2c-418c-86a2-250bf44038f4"
+$tenantId = "25798ea0-b97a-44b0-b1d8-3747bb6a5f3e"
+$clientSecret = Get-Secret -Name ("ppgeico_" + $clientId) -Vault 'SecretStore' -AsPlainText
+if (Connect-ToGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret) {
+    # Get emails from our target shared mailbox, only the last 5 days to limit the results
+    Get-MailboxContent -RecipientEmail "busmestest1@ppgeico.com"
+    Write-Host "Retrieved $($script:ListMessages.Count) messages from the mailbox." -ForegroundColor Green
+    if ($script:ListMessages.Count -eq 0) {
+        Write-Host "No messages found in the mailbox for the last 3 days."
+        exit
+    }
+    # Update the CSV tracker file with the received date and status for each email entry
+    Update-CsvFileTracker
 }
-
-# Update the CSV tracker file with the received date and status for each email entry
-Update-CsvFileTracker
-Write-ScriptExecution -Action "End" -Logfile "C:\Scripts\mailmonitor\EmailMonitor.log"
+else {
+    Write-Host "Failed to connect to Graph API." -ForegroundColor Red
+    Export-Csv -Path "D:\Scripts\mailmonitor\GraphFailures.csv" -Append -NoTypeInformation -InputObject @{
+        Script = "2_check-ppgeico-mail.ps1"
+        Date = Get-Date
+    }
+}
+Write-ScriptExecution -Action "End" -Logfile "D:\Scripts\mailmonitor\EmailMonitor.log"
